@@ -47,7 +47,13 @@ jobs:
       - run: npm test
       - run: npm run build
 
+      # `enablement: true` prende Pages desde el propio workflow (para eso esta
+      # el permiso `pages: write`). Sin esto el primer deploy muere aca hasta
+      # que alguien entre a Settings > Pages y elija GitHub Actions como origen.
       - uses: actions/configure-pages@v5
+        with:
+          enablement: true
+
       - uses: actions/upload-pages-artifact@v3
         with:
           path: dist
