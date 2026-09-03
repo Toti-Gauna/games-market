@@ -47,13 +47,11 @@ jobs:
       - run: npm test
       - run: npm run build
 
-      # `enablement: true` prende Pages desde el propio workflow (para eso esta
-      # el permiso `pages: write`). Sin esto el primer deploy muere aca hasta
-      # que alguien entre a Settings > Pages y elija GitHub Actions como origen.
+      # Pages hay que activarlo a mano una vez: Settings > Pages > Source:
+      # GitHub Actions. No se puede automatizar con `enablement: true` porque
+      # crear el sitio pide permisos de admin y el GITHUB_TOKEN del workflow
+      # no los tiene ("Resource not accessible by integration").
       - uses: actions/configure-pages@v5
-        with:
-          enablement: true
-
       - uses: actions/upload-pages-artifact@v3
         with:
           path: dist
