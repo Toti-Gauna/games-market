@@ -1,0 +1,102 @@
+/**
+ * Tokens Supernova — fuente unica de verdad del color.
+ *
+ * Los juegos NO hardcodean hex: leen estas variables una sola vez con
+ * `readPalette()` (src/core/engine/palette.ts) y cachean el resultado.
+ * Cambiar un valor aca cambia el shell, el HUD y el canvas a la vez.
+ *
+ * Contraste verificado contra --sn-bg (#07060F):
+ *   text        #F2EFFF  18.9:1   AAA
+ *   text-muted  #A79FD0   8.1:1   AAA
+ *   text-dim    #6E67A0   3.6:1   solo decorativo / bordes, nunca texto chico
+ *   cyan-400    #22E3F5  12.4:1   AAA
+ *   violet-300  #A78BFA   7.0:1   AAA
+ *   magenta-400 #FF3DAE   5.9:1   AA
+ *   violet-500  #7C4DFF   4.1:1   NO usar para texto: es color de relleno/glow
+ */
+
+:root,
+:root[data-theme="dark"] {
+  /* --- superficie --- */
+  --sn-bg: #07060f;
+  --sn-bg-elev: #100d1e;
+  --sn-panel: #17132b;
+  --sn-panel-hi: #1f1a3a;
+  --sn-line: #2a2350;
+  --sn-line-soft: #1c1738;
+
+  /* --- texto --- */
+  --sn-text: #f2efff;
+  --sn-text-muted: #a79fd0;
+  --sn-text-dim: #6e67a0;
+
+  /* --- acentos (escalas) --- */
+  --sn-violet-300: #a78bfa;
+  --sn-violet-400: #8b5cf6;
+  --sn-violet-500: #7c4dff;
+  --sn-violet-600: #5b21b6;
+
+  --sn-magenta-300: #ff7ac6;
+  --sn-magenta-400: #ff3dae;
+  --sn-magenta-500: #e0198c;
+
+  --sn-cyan-300: #7df0fb;
+  --sn-cyan-400: #22e3f5;
+  --sn-cyan-500: #0bb8c9;
+
+  /* alias cortos: son los que nombran las guias de games-guide */
+  --sn-violet: var(--sn-violet-500);
+  --sn-magenta: var(--sn-magenta-400);
+  --sn-cyan: var(--sn-cyan-400);
+
+  /* --- semanticos --- */
+  --sn-accent: var(--sn-violet-400);
+  --sn-accent-text: var(--sn-violet-300);
+  --sn-success: #2be38a;
+  --sn-warn: #ffb020;
+  --sn-danger: #ff4d6d;
+  --sn-focus: var(--sn-cyan-400);
+
+  /* --- estados del catalogo --- */
+  --sn-status-stable: var(--sn-success);
+  --sn-status-beta: var(--sn-warn);
+  --sn-status-draft: var(--sn-violet-300);
+  --sn-status-planned: var(--sn-text-dim);
+
+  /* --- topologias --- */
+  --sn-topo-solo: var(--sn-cyan-400);
+  --sn-topo-gamepad: var(--sn-violet-300);
+  --sn-topo-arena: var(--sn-magenta-400);
+
+  /* --- geometria --- */
+  --sn-radius-sm: 6px;
+  --sn-radius: 10px;
+  --sn-radius-lg: 16px;
+  --sn-radius-xl: 24px;
+
+  /* --- profundidad --- */
+  --sn-shadow-1: 0 1px 2px rgb(0 0 0 / 0.4);
+  --sn-shadow-2: 0 8px 24px -8px rgb(0 0 0 / 0.65);
+  --sn-glow-violet: 0 0 24px -4px rgb(124 77 255 / 0.55);
+  --sn-glow-cyan: 0 0 24px -4px rgb(34 227 245 / 0.45);
+  --sn-glow-magenta: 0 0 24px -4px rgb(255 61 174 / 0.45);
+
+  /* --- motion --- */
+  --sn-dur-fast: 120ms;
+  --sn-dur: 200ms;
+  --sn-dur-slow: 320ms;
+  --sn-ease: cubic-bezier(0.22, 1, 0.36, 1);
+
+  /* --- layout --- */
+  --sn-sidebar-w: 288px;
+  --sn-topbar-h: 56px;
+}
+
+/* Quien pide menos movimiento lo recibe en todo el sistema, no juego por juego. */
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --sn-dur-fast: 1ms;
+    --sn-dur: 1ms;
+    --sn-dur-slow: 1ms;
+  }
+}

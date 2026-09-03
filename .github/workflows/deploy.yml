@@ -1,0 +1,63 @@
+# Publica el patio de juegos en GitHub Pages.
+#
+# Pages sirve por HTTPS, que es lo que WebRTC necesita para que un celular
+# pueda abrir una RTCPeerConnection: con esto no hace falta el certificado
+# local de `npm run dev:https`.
+#
+# El build ya sale con rutas relativas (`base: "./"` en vite.config.ts), asi
+# que funciona igual en `usuario.github.io/repo/` que en la raiz. Y el router
+# es de hash, asi que recargar una ruta profunda no da 404 aunque Pages no
+# tenga reescritura.
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+  # Para poder republicar sin empujar nada.
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Un deploy a la vez. `cancel-in-progress: false` a proposito: cancelar un
+# deploy a mitad puede dejar el sitio publicado en un estado raro.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - run: npm ci
+
+      # Se verifica antes de publicar. `npm run build` ya corre `tsc -b`, pero
+      # los tests no, y publicar algo con la suite en rojo es peor que no
+      # publicar.
+      - run: npm run lint
+      - run: npm test
+      - run: npm run build
+
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

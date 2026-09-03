@@ -1,0 +1,220 @@
+@import "tailwindcss";
+@import "./tokens.css";
+
+/*
+ * `inline` sustituye el valor en las utilidades en vez de encadenar var(),
+ * asi que Tailwind y el canvas leen exactamente el mismo color.
+ */
+@theme inline {
+  --color-sn-bg: var(--sn-bg);
+  --color-sn-bg-elev: var(--sn-bg-elev);
+  --color-sn-panel: var(--sn-panel);
+  --color-sn-panel-hi: var(--sn-panel-hi);
+  --color-sn-line: var(--sn-line);
+  --color-sn-line-soft: var(--sn-line-soft);
+
+  --color-sn-text: var(--sn-text);
+  --color-sn-muted: var(--sn-text-muted);
+  --color-sn-dim: var(--sn-text-dim);
+
+  --color-sn-violet: var(--sn-violet-500);
+  --color-sn-violet-300: var(--sn-violet-300);
+  --color-sn-violet-400: var(--sn-violet-400);
+  --color-sn-magenta: var(--sn-magenta-400);
+  --color-sn-magenta-300: var(--sn-magenta-300);
+  --color-sn-cyan: var(--sn-cyan-400);
+  --color-sn-cyan-300: var(--sn-cyan-300);
+
+  --color-sn-accent: var(--sn-accent);
+  --color-sn-success: var(--sn-success);
+  --color-sn-warn: var(--sn-warn);
+  --color-sn-danger: var(--sn-danger);
+
+  --font-display: "Space Grotesk", ui-sans-serif, system-ui, sans-serif;
+  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, "SFMono-Regular", monospace;
+
+  --radius-sn-sm: var(--sn-radius-sm);
+  --radius-sn: var(--sn-radius);
+  --radius-sn-lg: var(--sn-radius-lg);
+  --radius-sn-xl: var(--sn-radius-xl);
+
+  --ease-sn: cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+@layer base {
+  * {
+    border-color: var(--sn-line-soft);
+  }
+
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+
+  body {
+    margin: 0;
+    background: var(--sn-bg);
+    color: var(--sn-text);
+    font-family: var(--font-sans);
+    font-size: 14px;
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+    overscroll-behavior: none;
+  }
+
+  h1, h2, h3, h4 {
+    font-family: var(--font-display);
+    letter-spacing: -0.015em;
+    font-weight: 600;
+  }
+
+  /* Un solo foco visible para todo. Nunca `outline: none` sin reemplazo. */
+  :focus-visible {
+    outline: 2px solid var(--sn-focus);
+    outline-offset: 2px;
+    border-radius: var(--sn-radius-sm);
+  }
+
+  ::selection {
+    background: var(--sn-violet-500);
+    color: #fff;
+  }
+
+  ::-webkit-scrollbar { width: 10px; height: 10px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb {
+    background: var(--sn-line);
+    border-radius: 999px;
+    border: 3px solid var(--sn-bg);
+  }
+  ::-webkit-scrollbar-thumb:hover { background: var(--sn-violet-600); }
+}
+
+@layer components {
+  /* Fondo de nebulosa. Es decorativo: `aria-hidden` donde se use. */
+  .sn-nebula {
+    background-image:
+      radial-gradient(60rem 30rem at 12% -10%, rgb(124 77 255 / 0.18), transparent 60%),
+      radial-gradient(45rem 28rem at 95% 0%, rgb(255 61 174 / 0.12), transparent 55%),
+      radial-gradient(40rem 24rem at 50% 110%, rgb(34 227 245 / 0.1), transparent 60%);
+  }
+
+  .sn-card {
+    background: color-mix(in oklab, var(--sn-panel) 82%, transparent);
+    border: 1px solid var(--sn-line-soft);
+    border-radius: var(--sn-radius-lg);
+  }
+
+  .sn-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    height: 2.25rem;
+    padding-inline: 0.875rem;
+    border-radius: var(--sn-radius);
+    border: 1px solid var(--sn-line);
+    background: var(--sn-panel);
+    color: var(--sn-text);
+    font-weight: 500;
+    font-size: 0.8125rem;
+    white-space: nowrap;
+    cursor: pointer;
+    transition:
+      background var(--sn-dur-fast) var(--sn-ease),
+      border-color var(--sn-dur-fast) var(--sn-ease),
+      transform var(--sn-dur-fast) var(--sn-ease);
+  }
+  .sn-btn:hover:not(:disabled) { background: var(--sn-panel-hi); border-color: var(--sn-violet-600); }
+  .sn-btn:active:not(:disabled) { transform: translateY(1px); }
+  .sn-btn:disabled { opacity: 0.45; cursor: not-allowed; }
+
+  .sn-btn--primary {
+    background: linear-gradient(135deg, var(--sn-violet-500), var(--sn-magenta-500));
+    border-color: transparent;
+    color: #fff;
+    box-shadow: var(--sn-glow-violet);
+  }
+  .sn-btn--primary:hover:not(:disabled) {
+    background: linear-gradient(135deg, var(--sn-violet-400), var(--sn-magenta-400));
+    border-color: transparent;
+  }
+
+  .sn-btn--ghost { background: transparent; border-color: transparent; color: var(--sn-text-muted); }
+  .sn-btn--ghost:hover:not(:disabled) { background: var(--sn-panel); color: var(--sn-text); }
+
+  .sn-btn--danger { border-color: color-mix(in oklab, var(--sn-danger) 45%, transparent); color: var(--sn-danger); }
+  .sn-btn--danger:hover:not(:disabled) { background: color-mix(in oklab, var(--sn-danger) 14%, transparent); }
+
+  .sn-input {
+    width: 100%;
+    height: 2rem;
+    padding-inline: 0.625rem;
+    border-radius: var(--sn-radius-sm);
+    border: 1px solid var(--sn-line);
+    background: var(--sn-bg-elev);
+    color: var(--sn-text);
+    font-size: 0.8125rem;
+    font-family: inherit;
+  }
+  .sn-input:hover { border-color: var(--sn-violet-600); }
+  textarea.sn-input { height: auto; padding-block: 0.375rem; resize: vertical; line-height: 1.45; }
+
+  .sn-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3rem;
+    padding: 0.125rem 0.5rem;
+    border-radius: 999px;
+    border: 1px solid var(--sn-line);
+    background: var(--sn-bg-elev);
+    font-size: 0.6875rem;
+    font-weight: 500;
+    line-height: 1.6;
+    color: var(--sn-text-muted);
+    white-space: nowrap;
+  }
+
+  .sn-num { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+
+  /* Slider comun a todo el panel de administrables. */
+  .sn-range {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 100%;
+    height: 4px;
+    border-radius: 999px;
+    background: var(--sn-line);
+    cursor: pointer;
+  }
+  .sn-range::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 14px;
+    height: 14px;
+    border-radius: 50%;
+    background: var(--sn-violet-400);
+    box-shadow: var(--sn-glow-violet);
+    cursor: grab;
+  }
+  .sn-range::-moz-range-thumb {
+    width: 14px;
+    height: 14px;
+    border: none;
+    border-radius: 50%;
+    background: var(--sn-violet-400);
+  }
+}
+
+@layer utilities {
+  .sn-scroll-y { overflow-y: auto; scrollbar-gutter: stable; }
+  .sn-grid-floor {
+    background-image:
+      linear-gradient(to right, rgb(124 77 255 / 0.07) 1px, transparent 1px),
+      linear-gradient(to bottom, rgb(124 77 255 / 0.07) 1px, transparent 1px);
+    background-size: 32px 32px;
+  }
+}

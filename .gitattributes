@@ -1,0 +1,6 @@
+# Normaliza finales de linea: el repo guarda LF y cada quien trabaja con lo suyo.
+* text=auto eol=lf
+*.png binary
+*.jpg binary
+*.webp binary
+*.woff2 binary
