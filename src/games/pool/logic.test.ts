@@ -1,9 +1,15 @@
 import { describe, expect, it } from "vitest";
 import { createRng } from "@/core/engine/rng";
 import {
+  AIM_ASPECT,
+  AIM_BALL_RADIUS,
   BALL_RADIUS,
   CUE_BALL,
   EIGHT_BALL,
+  TABLE_LENGTH,
+  TABLE_WIDTH,
+  fromAimPoint,
+  toAimPoint,
   createPoolState,
   foulTextOf,
   kindOf,
@@ -270,6 +276,44 @@ describe("poolPoints", () => {
     const conFalta = poolPoints({ ownPocketed: 1, fouls: 1, won: false, cleanShots: 0 });
     const sinFalta = poolPoints({ ownPocketed: 1, fouls: 0, won: false, cleanShots: 0 });
     expect(sinFalta - conFalta).toBe(50);
+  });
+});
+
+describe("coordenadas del mando", () => {
+  it("el centro de la mesa cae en el centro del rectangulo", () => {
+    const center = toAimPoint(0, 0);
+    expect(center.x).toBeCloseTo(0.5, 6);
+    expect(center.z).toBeCloseTo(0.5 / AIM_ASPECT, 6);
+  });
+
+  it("las esquinas caen en los bordes", () => {
+    expect(toAimPoint(-TABLE_LENGTH / 2, -TABLE_WIDTH / 2)).toEqual({ x: 0, z: 0 });
+    const far = toAimPoint(TABLE_LENGTH / 2, TABLE_WIDTH / 2);
+    expect(far.x).toBeCloseTo(1, 6);
+    expect(far.z).toBeCloseTo(1 / AIM_ASPECT, 6);
+  });
+
+  it("ida y vuelta devuelve el mismo punto", () => {
+    const original = { x: 0.42, z: -0.31 };
+    const aim = toAimPoint(original.x, original.z);
+    const back = fromAimPoint(aim.x, aim.z);
+    expect(back.x).toBeCloseTo(original.x, 9);
+    expect(back.z).toBeCloseTo(original.z, 9);
+  });
+
+  it("los dos ejes usan la misma escala, asi que un angulo se conserva", () => {
+    // Un desplazamiento igual en x y en z tiene que dar 45 grados en las dos
+    // escalas. Si cada eje se normalizara por su lado, aca daria otro angulo
+    // y la linea de tiro no coincidiria con la trayectoria real.
+    const from = toAimPoint(0, 0);
+    const to = toAimPoint(0.2, 0.2);
+    expect(Math.atan2(to.z - from.z, to.x - from.x)).toBeCloseTo(Math.PI / 4, 9);
+  });
+
+  it("el radio de bola queda en la misma escala que las posiciones", () => {
+    const left = toAimPoint(-BALL_RADIUS, 0);
+    const right = toAimPoint(BALL_RADIUS, 0);
+    expect(right.x - left.x).toBeCloseTo(AIM_BALL_RADIUS * 2, 9);
   });
 });
 

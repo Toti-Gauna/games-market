@@ -20,6 +20,7 @@ import { ludoSettings } from "./ludo/settings";
 import { corredorSettings } from "./corredor/settings";
 import { futbolSettings } from "./futbol/settings";
 import { carrerasSettings } from "./carreras/settings";
+import { poolSettings } from "./pool/settings";
 
 /**
  * Los 24 juegos de games-guide.
@@ -551,22 +552,27 @@ export const GAMES: readonly GameEntry[] = [
     id: "pool",
     code: "X2",
     title: "Pool",
-    tagline: "Apuntás con el celular como si fuera el taco.",
+    // Nada de inclinar el telefono: se apunta con el dedo sobre la vista
+    // cenital, y se afina con zoom de dos dedos. La guia es explicita —
+    // apuntar por inclinacion se ve bien en un video y es impreciso en la
+    // mano, y el pool necesita precision.
+    tagline: "La mesa en la pantalla, el taco en tu celular.",
     category: "creative",
     topology: "gamepad",
     engine: "r3f",
-    status: "planned",
+    status: "beta",
     effort: "L",
     batch: 11,
-    enabled: false,
+    enabled: true,
     needsNet: true,
     minPlayers: 2,
     maxPlayers: 2,
-    inputs: ["tilt", "touch"],
+    inputs: ["touch"],
     estimatedMin: 8,
     tags: ["billar", "física 3D", "apuntar"],
     guide: "X2-POOL.md",
-    settings: [],
+    settings: poolSettings,
+    load: () => import("./pool/PoolGame"),
   },
   {
     id: "metaverso",

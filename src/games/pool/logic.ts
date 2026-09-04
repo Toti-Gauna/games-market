@@ -522,6 +522,38 @@ export function resolveShot(state: PoolState, events: ShotEvents): ShotResult {
 }
 
 /* ------------------------------------------------------------------ */
+/* La mesa como la ve el celular                                       */
+/* ------------------------------------------------------------------ */
+
+/**
+ * De metros a las coordenadas del mando.
+ *
+ * **Los dos ejes se dividen por el largo**, no cada uno por su lado. Es la
+ * unica forma de que un angulo signifique lo mismo de los dos lados: con
+ * escalas distintas, apuntar a 30 grados en el telefono seria otro angulo en
+ * la mesa, y la linea de tiro dejaria de coincidir con la trayectoria real.
+ */
+export function toAimPoint(x: number, z: number): { x: number; z: number } {
+  return {
+    x: (x + TABLE_LENGTH / 2) / TABLE_LENGTH,
+    z: (z + TABLE_WIDTH / 2) / TABLE_LENGTH,
+  };
+}
+
+/** La vuelta, para colocar la blanca donde toco el dedo. */
+export function fromAimPoint(x: number, z: number): { x: number; z: number } {
+  return {
+    x: x * TABLE_LENGTH - TABLE_LENGTH / 2,
+    z: z * TABLE_LENGTH - TABLE_WIDTH / 2,
+  };
+}
+
+/** Radio y boca en la escala del mando. */
+export const AIM_ASPECT = TABLE_LENGTH / TABLE_WIDTH;
+export const AIM_BALL_RADIUS = BALL_RADIUS / TABLE_LENGTH;
+export const AIM_POCKET_RADIUS = POCKET_RADIUS / TABLE_LENGTH;
+
+/* ------------------------------------------------------------------ */
 /* Fin por tiempo                                                      */
 /* ------------------------------------------------------------------ */
 
