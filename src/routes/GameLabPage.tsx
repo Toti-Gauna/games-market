@@ -218,14 +218,24 @@ function GameLab({ entry }: { entry: GameEntry }) {
       const seat = entry.needsNet ? prefs.seat + 2 : prefs.seat + 1;
       url.hash = `#/juego/${entry.id}?asiento=${seat}${seedParam}`;
     } else {
-      url.hash = `#/control/lab-${entry.id}?asiento=${prefs.seat + 1}&asientos=${prefs.playerCount}&transporte=${prefs.transport}`;
+      /*
+       * `asientos` son los del JUEGO, no los que simula el banco de pruebas.
+       *
+       * Antes viajaba `prefs.playerCount`, que es otra cosa: cuantos jugadores
+       * simula esta maquina, con 1 por defecto. El celular usaba ese numero
+       * como techo de lo que podia pedir, asi que con el valor por defecto
+       * todo lugar que la persona tocara se recortaba al asiento 0 —el unico
+       * ocupado— y la pantalla de elegir volvia sola, para siempre. El host
+       * abre `maxPlayers` asientos: eso es lo que hay que decirle al telefono.
+       */
+      url.hash = `#/control/lab-${entry.id}?asiento=${prefs.seat + 1}&asientos=${entry.maxPlayers}&transporte=${prefs.transport}`;
     }
     try {
       setQr(await QRCode.toDataURL(url.toString(), { margin: 1, width: 220 }));
     } catch {
       setQr(null);
     }
-  }, [qr, prefs.seat, prefs.playerCount, prefs.transport, entry, runSeed]);
+  }, [qr, prefs.seat, prefs.transport, entry, runSeed]);
 
   return (
     <div className="flex min-h-full flex-col xl:h-full xl:flex-row">

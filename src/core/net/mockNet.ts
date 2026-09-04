@@ -627,6 +627,26 @@ export function createMockNet<TInput, TState>(options: MockNetOptions<TInput, TS
   let rejection: SeatRejection | null = null;
   let lastHostMs = performance.now();
 
+  /**
+   * Cuantos asientos cree el cliente que hay.
+   *
+   * Arranca en lo que dijo el QR, pero **manda el host**: el numero de la URL
+   * es una pista, no la verdad. Cuando el QR se queda corto, acotar contra el
+   * recortaba a 0 cualquier lugar que la persona tocara en la lista de libres
+   * —pedia otra vez el asiento ocupado y volvia sola la pantalla de elegir,
+   * en un bucle sin salida—. La lista libre que viene en cada respuesta dice
+   * cuantos hay de verdad.
+   */
+  let knownSeats = seats;
+
+  function learnSeats(payload: SeatPayload): void {
+    let highest = payload.seat;
+    for (const free of payload.freeSeats) {
+      if (free > highest) highest = free;
+    }
+    if (highest + 1 > knownSeats) knownSeats = highest + 1;
+  }
+
   function sendClaim(): void {
     post<ClaimPayload>(MSG_CLAIM, { token, seat: desiredSeat, name });
   }
@@ -651,6 +671,9 @@ export function createMockNet<TInput, TState>(options: MockNetOptions<TInput, TS
       if (payload.token !== token) return;
       hostId = msg.from;
       lastHostMs = performance.now();
+      // Aunque la respuesta sea de un pedido viejo, sirve para saber cuantos
+      // asientos hay: eso no cambia porque llegue tarde.
+      learnSeats(payload);
       /*
        * Respuesta a un pedido que ya no esta en pie: se descarta.
        *
@@ -856,7 +879,11 @@ export function createMockNet<TInput, TState>(options: MockNetOptions<TInput, TS
 
     claimSeat(next) {
       if (role === "host") return;
-      desiredSeat = Math.min(seats - 1, Math.max(0, Math.round(next)));
+      // Se acota contra lo que dijo el host, no contra lo que dijo el QR. Un
+      // asiento que no exista lo rechaza el host por fuera de rango, que es
+      // un error visible; recortarlo aca lo convertia en un pedido silencioso
+      // por el asiento 0, que es justo el que estaba ocupado.
+      desiredSeat = Math.min(knownSeats - 1, Math.max(0, Math.round(next)));
       rejection = null;
       status = "claiming";
       sendClaim();
