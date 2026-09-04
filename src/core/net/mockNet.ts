@@ -651,6 +651,17 @@ export function createMockNet<TInput, TState>(options: MockNetOptions<TInput, TS
       if (payload.token !== token) return;
       hostId = msg.from;
       lastHostMs = performance.now();
+      /*
+       * Respuesta a un pedido que ya no esta en pie: se descarta.
+       *
+       * El canal de WebRTC se abre con `reliable: false`, o sea SIN orden
+       * garantizado, y encima el claim se reintenta cada 600 ms mientras se
+       * espera. Con eso, la respuesta a un asiento anterior puede llegar
+       * despues de la del actual. Aceptarla declara rechazado a alguien que
+       * ya esta sentado: es el "ese lugar esta ocupado" con la sala vacia, y
+       * en una sala real deja afuera a todos menos al primero.
+       */
+      if (payload.seat !== desiredSeat) return;
       if (payload.ok) {
         seat = payload.seat;
         desiredSeat = payload.seat;
