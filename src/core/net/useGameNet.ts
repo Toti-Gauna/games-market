@@ -76,6 +76,8 @@ export type GameNetHandle<TInput, TState> = {
   /** "Ese lugar está ocupado": el segundo que escaneo el mismo QR. */
   rejection: SeatRejection | null;
   rttMs: number;
+  /** Por que no conecta el transporte. null = anda, o no reporta. */
+  transportError: string | null;
   stats: NetStats;
   conditions: NetConditions;
   setConditions: (next: Partial<NetConditions>) => void;
@@ -108,6 +110,7 @@ export function useGameNet<TInput, TState>(
   const [status, setStatus] = useState<ClientStatus | "off">("off");
   const [rejection, setRejection] = useState<SeatRejection | null>(null);
   const [rttMs, setRttMs] = useState(0);
+  const [transportError, setTransportError] = useState<string | null>(null);
   const [stats, setStats] = useState<NetStats>(EMPTY_STATS);
   const [conditions, setConditionsState] = useState<NetConditions>({ latencyMs, jitterMs, lossRate });
 
@@ -179,6 +182,7 @@ export function useGameNet<TInput, TState>(
       setPlayers(port.players());
       setStatus(port.status);
       setRttMs(port.rttMs);
+      setTransportError(port.transportError);
       setStats(port.stats());
       setRejection(port.rejection);
     }, SAMPLE_MS);
@@ -224,6 +228,7 @@ export function useGameNet<TInput, TState>(
     status,
     rejection,
     rttMs,
+    transportError,
     stats,
     conditions,
     setConditions,

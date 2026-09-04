@@ -70,6 +70,20 @@ export default function ControlPage() {
     return "Conectando…";
   }, [net.rejection, net.status, net.rttMs]);
 
+  /*
+   * Por que no conecta, cuando se sabe.
+   *
+   * Sin esto el telefono dice "Conectando..." para siempre y las tres causas
+   * —el proyector no abrio el juego, hay dos proyectores en la misma sala, la
+   * red no deja armar el camino directo— se ven exactamente igual. En una sala
+   * con gente esperando, eso es la diferencia entre arreglarlo en diez
+   * segundos y no saber por donde empezar.
+   *
+   * Solo mientras no este conectado: una vez adentro, el ultimo error de
+   * reconexion ya no le importa a nadie.
+   */
+  const trouble = net.status === "live" ? null : net.transportError;
+
   if (net.rejection) {
     return (
       <div className="grid h-full place-items-center bg-sn-bg p-6 text-center">
@@ -102,13 +116,25 @@ export default function ControlPage() {
   }
 
   return (
-    <GamepadController
-      spec={spec}
-      seat={port?.seat ?? seat}
-      onInput={sendInput}
-      status={status}
-      connected={net.status === "live"}
-    />
+    <div className="flex h-full w-full flex-col">
+      <div className="min-h-0 flex-1">
+        <GamepadController
+          spec={spec}
+          seat={port?.seat ?? seat}
+          onInput={sendInput}
+          status={status}
+          connected={net.status === "live"}
+        />
+      </div>
+      {trouble && (
+        <p
+          className="shrink-0 border-t border-sn-line-soft bg-sn-bg-elev px-4 py-2 text-center text-xs text-sn-warn"
+          aria-live="polite"
+        >
+          {trouble}
+        </p>
+      )}
+    </div>
   );
 }
 

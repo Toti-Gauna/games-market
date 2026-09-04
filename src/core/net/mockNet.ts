@@ -137,6 +137,11 @@ export type MockNetPort<TInput, TState> = GameNetPort<TInput, TState> & {
   readonly status: ClientStatus;
   /** Solo cliente: el ultimo rechazo, para pintarlo sin suscribirse. */
   readonly rejection: SeatRejection | null;
+  /**
+   * Por que no conecta el transporte, en castellano y listo para mostrar.
+   * null = el cano esta bien o no reporta estado (BroadcastChannel).
+   */
+  readonly transportError: string | null;
   stats(): NetStats;
 };
 
@@ -295,6 +300,29 @@ export function createMockNet<TInput, TState>(options: MockNetOptions<TInput, TS
     name,
   });
   transport.setSimulation({ latencyMs: conditions.latencyMs, lossRate: conditions.lossRate });
+
+  /*
+   * El motivo por el que el cano no conecta.
+   *
+   * peerNet ya distingue "el proyector todavia no esta abierto" de "ya hay
+   * otro proyector en esta sala", pero ese detalle moria en el transporte: el
+   * telefono decia "Conectando..." pasara lo que pasara. Un fallo mudo en una
+   * sala con gente esperando es lo mas caro que hay, porque no se puede
+   * distinguir de que alguien todavia no escaneo.
+   *
+   * Se detecta por capacidad y no por tipo: NetTransport no obliga a tener
+   * onStatus —BroadcastChannel no lo necesita, siempre esta conectado— asi
+   * que quien lo traiga lo reporta y quien no, no cambia en nada.
+   */
+  let transportError: string | null = null;
+  const withStatus = transport as typeof transport & {
+    onStatus?: (cb: (status: string, error: string | null) => void) => () => void;
+  };
+  if (typeof withStatus.onStatus === "function") {
+    withStatus.onStatus((_status, error) => {
+      transportError = error;
+    });
+  }
 
   const inputEmitter = createEmitter<[string, TInput, number]>();
   const stateEmitter = createEmitter<[TState, number, number]>();
@@ -895,6 +923,10 @@ export function createMockNet<TInput, TState>(options: MockNetOptions<TInput, TS
 
     get rejection() {
       return rejection;
+    },
+
+    get transportError() {
+      return transportError;
     },
 
     get rttMs() {

@@ -251,3 +251,52 @@ describe("reparto de asientos", () => {
     expect(phone.rejection?.reason).toBe("out-of-range");
   });
 });
+
+/**
+ * El motivo por el que no conecta tiene que llegar hasta la pantalla.
+ *
+ * `peerNet` distingue tres causas bien distintas y hasta ahora las tres se
+ * veian igual en el telefono: "Conectando...". Lo que se prueba aca es que la
+ * sesion las deje pasar, sin obligar a todos los transportes a reportarlas.
+ */
+describe("diagnostico del transporte", () => {
+  it("un transporte que no reporta estado no rompe nada", () => {
+    const bus = createBus();
+    const host = make(bus, "host", { role: "host", seat: -1, seats: 2 });
+    expect(host.transportError).toBeNull();
+  });
+
+  it("deja pasar el motivo que reporta el transporte", () => {
+    const bus = createBus();
+    // En un contenedor y no en un `let`: TypeScript no ve la asignacion que
+    // ocurre dentro del callback y estrecharia la variable a `never`.
+    const sink: { emit: ((status: string, error: string | null) => void) | null } = { emit: null };
+
+    const port = createMockNet<unknown, unknown>({
+      roomId: "sala",
+      role: "client",
+      seat: 0,
+      seats: 2,
+      token: "token-x",
+      conditions: { latencyMs: 0, jitterMs: 0, lossRate: 0 },
+      transport: (init) => {
+        const base = busTransport(bus, "x")(init);
+        return Object.assign(base, {
+          onStatus(cb: (status: string, error: string | null) => void) {
+            sink.emit = cb;
+            return () => {};
+          },
+        });
+      },
+    });
+    ports.push(port);
+
+    expect(port.transportError).toBeNull();
+    sink.emit?.("failed", "Ya hay otro proyector abierto en esta sala");
+    expect(port.transportError).toBe("Ya hay otro proyector abierto en esta sala");
+
+    // Y se limpia cuando el transporte se recupera.
+    sink.emit?.("online", null);
+    expect(port.transportError).toBeNull();
+  });
+});
