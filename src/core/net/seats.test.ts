@@ -250,6 +250,32 @@ describe("reparto de asientos", () => {
 
     expect(phone.rejection?.reason).toBe("out-of-range");
   });
+
+  /*
+   * El proyector se recarga y arranca con los asientos vacios.
+   *
+   * El celular no se entera de nada: sigue recibiendo el roster, asi que su
+   * reloj de silencio nunca vence y nunca entra en "reconnecting". Sin esto se
+   * queda diciendo "conectado" contra un host que no lo conoce, y el proyector
+   * muestra la sala vacia con los telefonos convencidos de estar adentro.
+   */
+  it("vuelve a sentarse solo cuando el proyector se recargo y no lo conoce", () => {
+    const bus = createBus();
+    const first = make(bus, "host", { role: "host", seat: -1, seats: 4 });
+    const phone = make(bus, "a", { role: "client", seat: 0, seats: 4 });
+
+    expect(phone.status).toBe("live");
+    expect(first.players().filter((p) => !p.bot)).toHaveLength(1);
+
+    // Se recarga el proyector: puerto nuevo, mismos asientos, sala vacia. Al
+    // arrancar publica su roster, y ahi el celular se da cuenta y reclama.
+    first.dispose();
+    const second = make(bus, "host2", { role: "host", seat: -1, seats: 4 });
+
+    expect(phone.status).toBe("live");
+    expect(phone.seat).toBe(0);
+    expect(second.players().filter((p) => !p.bot)).toHaveLength(1);
+  });
 });
 
 /**

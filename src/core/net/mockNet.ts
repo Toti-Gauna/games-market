@@ -742,6 +742,24 @@ export function createMockNet<TInput, TState>(options: MockNetOptions<TInput, TS
       lastHostMs = performance.now();
       if (status === "reconnecting") status = "live";
       applyRoster(payload.players);
+      /*
+       * El host publica quien esta sentado. Si me creo sentado y no estoy en
+       * esa lista, el que se equivoca soy yo: vuelvo a pedir mi asiento.
+       *
+       * Pasa cada vez que el proyector se recarga o remonta la escena. El host
+       * arranca con los asientos vacios, pero el celular no se entera de nada:
+       * sigue recibiendo el roster, asi que su reloj de silencio nunca vence y
+       * nunca entra en "reconnecting". Queda diciendo "conectado" para siempre
+       * contra un host que no lo conoce, y el proyector muestra la sala vacia
+       * con dos telefonos convencidos de estar adentro.
+       *
+       * Reclamar de mas no cuesta: al host le llega el mismo token para el
+       * mismo asiento y solo refresca lo que ya tenia.
+       */
+      if (status === "live" && !payload.players.some((player) => player.id === transport.playerId)) {
+        status = "claiming";
+        sendClaim();
+      }
       return;
     }
 

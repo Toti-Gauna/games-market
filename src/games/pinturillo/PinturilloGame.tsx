@@ -1258,7 +1258,16 @@ export default function PinturilloGame({ config, signal, onFinish }: GameProps) 
           <p className="sn-num text-2xl text-sn-cyan" aria-live="polite">
             {humans.length} {humans.length === 1 ? "conectado" : "conectados"}
           </p>
-          {humans.length < MIN_PLAYERS && (
+          {/* Un cero sin explicacion manda a revisar el WiFi cuando el
+              problema puede ser que haya otro proyector abierto en la misma
+              sala. Si el transporte no levanto, el motivo va aca: es la unica
+              pantalla donde alguien lo va a leer. */}
+          {netHandle.transportError && (
+            <p className="text-sm text-sn-danger" aria-live="polite">
+              {netHandle.transportError}
+            </p>
+          )}
+          {!netHandle.transportError && humans.length < MIN_PLAYERS && (
             <p className="text-sm text-sn-warn">
               Hacen falta al menos {MIN_PLAYERS}: uno dibuja y dos adivinan. Con dos, es raro.
             </p>

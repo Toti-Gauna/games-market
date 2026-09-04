@@ -253,7 +253,7 @@ function GameLab({ entry }: { entry: GameEntry }) {
   return (
     <div className="flex min-h-full flex-col xl:h-full xl:flex-row">
       <section className="flex min-w-0 flex-1 flex-col gap-3 p-4 sm:p-5">
-        <header className="flex flex-wrap items-start justify-between gap-3">
+        <header className="flex shrink-0 flex-wrap items-start justify-between gap-3">
           <div className="min-w-0">
             <div className="flex items-center gap-2">
               <span className="sn-num text-[10px] tracking-widest text-sn-dim">{entry.code}</span>
@@ -285,10 +285,15 @@ function GameLab({ entry }: { entry: GameEntry }) {
             la altura real de la columna: sin eso, un juego que se mide contra
             su contenedor —el lienzo de Pinturillo— se queda con el alto de su
             propio contenido y termina del tamano de un sello. */}
+        {/* `relative` SOLO en pantalla completa, que es cuando hay un boton
+            absoluto que colgar. En el layout normal, posicionar este marco lo
+            pinta por encima de lo que tiene arriba: cuando la ventana es baja
+            y el minimo de 420 no entra, el juego se desborda y tapa los chips
+            del encabezado. */}
         <div
           ref={stageRef}
-          className={`relative flex-1 ${
-            fullscreen.active ? "min-h-0 bg-sn-bg" : "min-h-[420px] xl:min-h-0"
+          className={`flex-1 ${
+            fullscreen.active ? "relative min-h-0 bg-sn-bg" : "min-h-[420px] xl:min-h-0"
           }`}
         >
           {playable && GameComponent ? (
