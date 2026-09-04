@@ -26,6 +26,7 @@ import {
 import { getGame } from "@/games/registry";
 import { SettingsPanel } from "@/ui/admin/SettingsPanel";
 import { EffortChip, StatusChip, TopologyChip } from "@/ui/catalog/badges";
+import { useFullscreen } from "@/ui/game/useFullscreen";
 
 /**
  * El banco de pruebas.
@@ -71,6 +72,18 @@ function GameLab({ entry }: { entry: GameEntry }) {
 
   const abortRef = useRef<AbortController>(new AbortController());
   const netRef = useRef<BroadcastNetPort | null>(null);
+
+  /*
+   * Pantalla completa sobre el marco del juego, no sobre el documento.
+   *
+   * Va aca y no adentro de cada juego porque no todos usan `GameStage`: los
+   * `arena` —Pinturillo es el caso— arman su propia pantalla de proyector y
+   * se quedaban sin el boton. Puesto sobre el marco, el juego se lleva el
+   * monitor entero sin importar como este hecho por dentro, que es la unica
+   * forma de que un dibujo se vea desde el fondo de una sala.
+   */
+  const stageRef = useRef<HTMLDivElement | null>(null);
+  const fullscreen = useFullscreen(stageRef);
 
   const playable = isPlayable(entry);
 
@@ -250,7 +263,17 @@ function GameLab({ entry }: { entry: GameEntry }) {
             <h1 className="mt-0.5 text-xl">{entry.title}</h1>
             <p className="mt-0.5 max-w-xl text-xs text-sn-muted">{entry.tagline}</p>
           </div>
-          <div className="flex flex-wrap gap-1">
+          <div className="flex flex-wrap items-center gap-1">
+            {playable && fullscreen.supported && (
+              <button
+                type="button"
+                className="sn-btn h-7 px-2.5 text-[11px]"
+                onClick={fullscreen.toggle}
+                aria-pressed={fullscreen.active}
+              >
+                Pantalla completa
+              </button>
+            )}
             <TopologyChip topology={entry.topology} />
             <span className="sn-chip">{ENGINE_LABEL[entry.engine]}</span>
             <EffortChip entry={entry} />
@@ -258,7 +281,16 @@ function GameLab({ entry }: { entry: GameEntry }) {
           </div>
         </header>
 
-        <div className="min-h-[420px] flex-1">
+        {/* `min-h-0` para que el juego pueda encogerse dentro del flex y tome
+            la altura real de la columna: sin eso, un juego que se mide contra
+            su contenedor —el lienzo de Pinturillo— se queda con el alto de su
+            propio contenido y termina del tamano de un sello. */}
+        <div
+          ref={stageRef}
+          className={`relative flex-1 ${
+            fullscreen.active ? "min-h-0 bg-sn-bg" : "min-h-[420px] xl:min-h-0"
+          }`}
+        >
           {playable && GameComponent ? (
             <Suspense fallback={<LoadingStage />}>
               <GameComponent
@@ -271,6 +303,22 @@ function GameLab({ entry }: { entry: GameEntry }) {
             </Suspense>
           ) : (
             <PendingSpec entry={entry} />
+          )}
+
+          {/* En pantalla completa el panel de la derecha deja de existir, asi
+              que la salida tiene que estar aca. Escape tambien sirve, pero en
+              un proyector el mouse esta mas a mano que el teclado.
+              `data-game-ui` para que el input del juego no lo cuente como
+              toque en el lienzo. */}
+          {fullscreen.active && (
+            <button
+              type="button"
+              data-game-ui
+              className="sn-btn absolute right-3 top-3 z-20 h-8 px-3 text-[11px] opacity-40 transition-opacity hover:opacity-100 focus-visible:opacity-100"
+              onClick={fullscreen.toggle}
+            >
+              Salir
+            </button>
           )}
         </div>
       </section>
