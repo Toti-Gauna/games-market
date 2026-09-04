@@ -1,4 +1,5 @@
 import type { ReactNode, RefObject } from "react";
+import { useFullscreen } from "./useFullscreen";
 import type { GamePhase } from "@/core/engine/useGame2D";
 
 /**
@@ -71,6 +72,7 @@ export function GameStage({
   aspect,
   fps,
 }: GameStageProps) {
+  const fullscreen = useFullscreen(containerRef);
   const showOverlay = phase !== "playing";
 
   return (
@@ -78,7 +80,13 @@ export function GameStage({
       <div
         ref={containerRef}
         className="relative flex min-h-0 flex-1 touch-none select-none items-center justify-center overflow-hidden rounded-sn-lg border border-sn-line-soft bg-sn-bg"
-        style={{ aspectRatio: aspect }}
+        /*
+         * En pantalla completa se suelta la proporcion: con `aspectRatio`
+         * puesto, el contenedor se queda del tamano que pedia el juego y
+         * sobra pantalla negra alrededor. El encuadre lo resuelve igual la
+         * superficie, que ya escala a lo que le den.
+         */
+        style={fullscreen.active ? undefined : { aspectRatio: aspect }}
       >
         {surface ? (
           <div className="absolute inset-0">{surface}</div>
@@ -112,6 +120,17 @@ export function GameStage({
             >
               {muted ? "Sonido apagado" : "Sonido"}
             </button>
+            {fullscreen.supported && (
+              <button
+                type="button"
+                className="sn-btn sn-btn--ghost h-7 px-2 text-xs"
+                onClick={fullscreen.toggle}
+                aria-pressed={fullscreen.active}
+                title={fullscreen.active ? "Salir de pantalla completa" : "Pantalla completa"}
+              >
+                {fullscreen.active ? "Salir" : "Pantalla completa"}
+              </button>
+            )}
             {phase === "playing" && (
               <button type="button" className="sn-btn sn-btn--ghost h-7 px-2 text-xs" onClick={onPause}>
                 Pausa

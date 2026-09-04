@@ -4,12 +4,14 @@ import {
   CATEGORY_LABEL,
   ENGINE_LABEL,
   isPlayable,
+  opensInTab,
   TOPOLOGY_LABEL,
   type GameCategory,
   type GameEntry,
   type GameTopology,
 } from "@/core/contract/catalog";
 import { GAMES } from "@/games/registry";
+import { GameLaunchLink } from "@/ui/catalog/GameLaunchLink";
 import { EffortChip, StatusChip, TopologyChip } from "@/ui/catalog/badges";
 
 /**
@@ -155,8 +157,8 @@ function GameCard({ game }: { game: GameEntry }) {
   const playable = isPlayable(game);
 
   return (
-    <Link
-      to={`/juego/${game.id}`}
+    <GameLaunchLink
+      game={game}
       className="sn-card group flex h-full flex-col gap-3 p-4 transition-colors hover:border-sn-violet"
     >
       <div className="flex items-start justify-between gap-2">
@@ -187,9 +189,11 @@ function GameCard({ game }: { game: GameEntry }) {
           <span className="sn-num">~{game.estimatedMin} min</span>
         </span>
         <span className={playable ? "font-medium text-sn-cyan" : ""}>
-          {playable ? "Jugar" : `Tanda ${game.batch}`}
+          {/* La flecha avisa que abre afuera. Un enlace que cambia de pestaña
+              sin decirlo se siente como que la aplicación se perdió. */}
+          {playable ? (opensInTab(game) ? "Jugar ↗" : "Jugar") : `Tanda ${game.batch}`}
         </span>
       </div>
-    </Link>
+    </GameLaunchLink>
   );
 }

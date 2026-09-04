@@ -1,17 +1,11 @@
 import type { GameEntry } from "@/core/contract/catalog";
 import { snakeSettings } from "./serpiente/settings";
 import { flappySettings } from "./vuelo/settings";
-import { profileTestSettings } from "./test-de-perfil/settings";
-import { livePollSettings } from "./formulario-vivo/settings";
-import { memoriaSettings } from "./memoria/settings";
-import { prioridadesSettings } from "./prioridades/settings";
 import { saltarinSettings } from "./saltarin/settings";
 import { ninjaSettings } from "./ninja/settings";
 import { combinacionesSettings } from "./combinaciones/settings";
 import { catapultaSettings } from "./catapulta/settings";
 import { pongSettings } from "./pong/settings";
-import { triviaSettings } from "./trivia/settings";
-import { verdaderoOFalsoSettings } from "./verdadero-o-falso/settings";
 import { tetrisDueloSettings } from "./tetris-duelo/settings";
 import { rompeladrillosSettings } from "./rompeladrillos/settings";
 import { invasoresSettings } from "./invasores/settings";
@@ -82,103 +76,6 @@ export const GAMES: readonly GameEntry[] = [
     guide: "M3-FLAPPY.md",
     settings: flappySettings,
     load: () => import("./vuelo/VueloGame"),
-  },
-  {
-    id: "test-de-perfil",
-    code: "C2",
-    title: "¿Cómo trabajás?",
-    tagline: "Cuestionario que devuelve un arquetipo de trabajo.",
-    category: "corporate",
-    topology: "solo",
-    engine: "dom",
-    status: "stable",
-    effort: "S",
-    batch: 2,
-    enabled: true,
-    needsNet: false,
-    minPlayers: 1,
-    maxPlayers: 1,
-    inputs: ["touch", "pointer"],
-    estimatedMin: 3,
-    tags: ["perfil", "cuestionario", "sin puntaje"],
-    guide: "C2-TEST-DE-PERFIL.md",
-    settings: profileTestSettings,
-    load: () => import("./test-de-perfil/TestDePerfilGame"),
-  },
-  {
-    id: "formulario-vivo",
-    code: "C3",
-    title: "Pulso del equipo",
-    tagline: "Encuesta con progreso y micro-recompensas. El outcome es la respuesta.",
-    category: "corporate",
-    topology: "solo",
-    engine: "dom",
-    status: "stable",
-    effort: "S",
-    batch: 2,
-    enabled: true,
-    needsNet: false,
-    minPlayers: 1,
-    maxPlayers: 1,
-    inputs: ["touch", "pointer"],
-    estimatedMin: 3,
-    tags: ["encuesta", "formulario", "clima"],
-    guide: "C3-FORMULARIO-VIVO.md",
-    settings: livePollSettings,
-    load: () => import("./formulario-vivo/FormularioVivoGame"),
-  },
-
-  /* ---------------------------------------------------------------- */
-  /* Tanda 3 · corporativos DOM, sin red                               */
-  /* ---------------------------------------------------------------- */
-  {
-    id: "memoria",
-    code: "C4",
-    title: "Memoria de valores",
-    tagline: "Emparejá los principios de la cultura antes de que se acabe el tiempo.",
-    category: "corporate",
-    topology: "solo",
-    engine: "dom",
-    status: "stable",
-    effort: "S",
-    batch: 3,
-    enabled: true,
-    needsNet: false,
-    minPlayers: 1,
-    maxPlayers: 1,
-    inputs: ["touch", "pointer"],
-    estimatedMin: 3,
-    tags: ["unir pares", "cultura", "contra reloj"],
-    guide: "C4-MEMORIA.md",
-    settings: memoriaSettings,
-    load: () => import("./memoria/MemoriaGame"),
-  },
-  {
-    id: "prioridades",
-    code: "C5",
-    title: "Prioridades",
-    tagline: "Ordená ocho cosas por importancia. Después vemos qué piensa el equipo.",
-    category: "corporate",
-    // Paso a `arena` cuando se construyo el proyector: el consenso y la
-    // division no existen con una sola respuesta.
-    topology: "arena",
-    engine: "dom",
-    status: "beta",
-    effort: "M",
-    batch: 3,
-    enabled: true,
-    needsNet: true,
-    minPlayers: 2,
-    maxPlayers: 40,
-    inputs: ["touch", "pointer"],
-    estimatedMin: 4,
-    tags: ["ranking", "arrastrar", "consenso", "desacuerdo"],
-    // Ordenar pide asa de arrastre, botones y teclado: nada de eso se expresa
-    // con un ControlSpec, y cada movimiento seria un viaje a la sala.
-    phoneRole: "player",
-    guide: "C5-PRIORIDADES.md",
-    settings: prioridadesSettings,
-    load: () => import("./prioridades/PrioridadesGame"),
   },
 
   /* ---------------------------------------------------------------- */
@@ -297,54 +194,6 @@ export const GAMES: readonly GameEntry[] = [
     guide: "R1-PONG.md",
     settings: pongSettings,
     load: () => import("./pong/PongGame"),
-  },
-
-  /* ---------------------------------------------------------------- */
-  /* Tanda 6 · corporativos en red                                     */
-  /* ---------------------------------------------------------------- */
-  {
-    id: "trivia",
-    code: "C1",
-    title: "Trivia relámpago",
-    tagline: "La pregunta en el proyector, las opciones en el celular. Puntos por velocidad.",
-    category: "corporate",
-    topology: "arena",
-    engine: "dom",
-    status: "beta",
-    effort: "M",
-    batch: 6,
-    enabled: false,
-    needsNet: true,
-    minPlayers: 2,
-    maxPlayers: 40,
-    inputs: ["touch"],
-    estimatedMin: 6,
-    tags: ["kahoot", "preguntas", "evento"],
-    guide: "C1-TRIVIA-RELAMPAGO.md",
-    settings: triviaSettings,
-    load: () => import("./trivia/TriviaGame"),
-  },
-  {
-    id: "verdadero-o-falso",
-    code: "C6",
-    title: "Verdadero o falso",
-    tagline: "10 afirmaciones, 5 segundos cada una, muerte súbita.",
-    category: "corporate",
-    topology: "arena",
-    engine: "dom",
-    status: "beta",
-    effort: "S",
-    batch: 6,
-    enabled: false,
-    needsNet: true,
-    minPlayers: 2,
-    maxPlayers: 40,
-    inputs: ["touch"],
-    estimatedMin: 3,
-    tags: ["rápido", "eliminación", "evento"],
-    guide: "C6-VERDADERO-O-FALSO.md",
-    settings: verdaderoOFalsoSettings,
-    load: () => import("./verdadero-o-falso/VerdaderoOFalsoGame"),
   },
 
   /* ---------------------------------------------------------------- */
@@ -560,6 +409,9 @@ export const GAMES: readonly GameEntry[] = [
     category: "creative",
     topology: "gamepad",
     engine: "r3f",
+    // 3D en pestana propia: no compite por el hilo principal con el catalogo,
+    // y cerrarla libera el contexto de GPU. Ver opensInTab.
+    launch: "tab",
     status: "beta",
     effort: "L",
     batch: 11,
@@ -582,6 +434,9 @@ export const GAMES: readonly GameEntry[] = [
     category: "creative",
     topology: "arena",
     engine: "r3f",
+    // 3D en pestana propia: no compite por el hilo principal con el catalogo,
+    // y cerrarla libera el contexto de GPU. Ver opensInTab.
+    launch: "tab",
     status: "planned",
     effort: "XL",
     batch: 11,
@@ -603,6 +458,9 @@ export const GAMES: readonly GameEntry[] = [
     category: "creative",
     topology: "arena",
     engine: "r3f",
+    // 3D en pestana propia: no compite por el hilo principal con el catalogo,
+    // y cerrarla libera el contexto de GPU. Ver opensInTab.
+    launch: "tab",
     status: "planned",
     effort: "XL",
     batch: 11,

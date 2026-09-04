@@ -3,6 +3,7 @@ import type { GameProps } from "@/core/contract/game";
 import type { AimBall, ControlInput, ControlSpec } from "@/core/contract/control";
 import type { NetPlayer } from "@/core/contract/gameNet";
 import { bool, num } from "@/core/contract/settings";
+import type { Sfx } from "@/core/engine/audio";
 import { createRng } from "@/core/engine/rng";
 import { useGameLifecycle } from "@/core/engine/useGameLifecycle";
 import { useGameNet } from "@/core/net/useGameNet";
@@ -118,6 +119,12 @@ export default function PoolGame({ config, signal, onFinish, onReady }: GameProp
   const seatPlayerRef = useRef<Array<NetPlayer | null>>([null, null]);
 
   const playingRef = useRef(false);
+  /*
+   * El sonido se toma por ref porque lo dispara `onInput`, que se registra
+   * antes de que exista el ciclo de vida. Es el segundo canal de feedback que
+   * pide el proyecto: en el proyector suena, y en el celular vibra.
+   */
+  const sfxRef = useRef<Sfx | null>(null);
 
   /* ---------------------------------------------------------------- */
   /* Red                                                               */
@@ -162,6 +169,7 @@ export default function PoolGame({ config, signal, onFinish, onReady }: GameProp
       const power = clamp01(input.power);
       const spin = spinEnabled ? clamp(input.spin, -1, 1) : 0;
       if (!Number.isFinite(input.angle) || power <= 0.05) return;
+      sfxRef.current?.play("hit");
       table.shoot(input.angle, power, spin);
     },
 
@@ -224,6 +232,7 @@ export default function PoolGame({ config, signal, onFinish, onReady }: GameProp
 
   const playing = life.phase === "playing";
   playingRef.current = playing;
+  sfxRef.current = life.sfx;
 
   useEffect(() => {
     onReady?.();
@@ -256,6 +265,15 @@ export default function PoolGame({ config, signal, onFinish, onReady }: GameProp
       snapshotRef.current = table?.read() ?? snapshotRef.current;
       versionRef.current++;
       turnEndsAtRef.current = performance.now() + turnMs;
+
+      /*
+       * Tres resultados, tres sonidos distintos. Que embocar y cometer falta
+       * suenen igual es lo mismo que no tener sonido: el segundo canal solo
+       * sirve si distingue.
+       */
+      if (state.over) life.sfx.play(result.lostOnEight ? "lose" : "win");
+      else if (result.foul !== null) life.sfx.play("lose");
+      else if (result.ownPocketed > 0) life.sfx.play("pick");
 
       const seat = state.turn;
       const group = state.groups[seatIndex(seat)];
@@ -384,7 +402,10 @@ export default function PoolGame({ config, signal, onFinish, onReady }: GameProp
         event.preventDefault();
         setPower((current) => {
           // Un roce sin carga no es un tiro: gastaria el turno sin mover nada.
-          if (current > 0.05) tableRef.current?.shoot(angle, current, spin);
+          if (current > 0.05) {
+            sfxRef.current?.play("hit");
+            tableRef.current?.shoot(angle, current, spin);
+          }
           return 0;
         });
       }

@@ -1,7 +1,7 @@
 import type { GameComponent } from "./game";
 import type { SettingsSchema } from "./settings";
 
-export type GameCategory = "retro" | "modern" | "corporate" | "creative";
+export type GameCategory = "retro" | "modern" | "creative";
 
 /** Como se reparten pantallas y controles. */
 export type GameTopology = "solo" | "gamepad" | "arena";
@@ -52,6 +52,14 @@ export type GameEntry = {
   guide: string;
   /** Administrables. Vacio mientras el juego no exista. */
   settings: SettingsSchema;
+  /**
+   * Donde se abre. Por defecto `inline`, adentro del catalogo.
+   *
+   * `tab` es para los juegos 3D: dejan de competir por el hilo principal con
+   * el resto de la aplicacion y cerrar la pestana libera el contexto de GPU
+   * sin depender de que el desmontaje limpie todo. Ver `opensInTab`.
+   */
+  launch?: "inline" | "tab";
   /** undefined = todavia no implementado. El catalogo lo muestra igual. */
   load?: () => Promise<{ default: GameComponent }>;
 };
@@ -59,7 +67,6 @@ export type GameEntry = {
 export const CATEGORY_LABEL: Record<GameCategory, string> = {
   retro: "Retro",
   modern: "Moderno",
-  corporate: "Corporativo",
   creative: "Creativo / 3D",
 };
 
@@ -100,6 +107,23 @@ export const EFFORT_LABEL: Record<GameEffort, string> = {
 
 export function isPlayable(entry: GameEntry): boolean {
   return typeof entry.load === "function";
+}
+
+/**
+ * Si el juego se abre en una pestana propia en vez de adentro del catalogo.
+ *
+ * Es para la 3D, y el motivo es concreto: un juego con WebGL y fisica en WASM
+ * comparte el hilo principal con el sidebar, el panel de administrables y el
+ * resto del catalogo. En su propia pestana no compite con nada, el navegador
+ * le da su propio presupuesto de cuadros, y **al cerrarla se libera seguro**
+ * el contexto de GPU —que es lo que no se puede garantizar al cambiar de ruta,
+ * donde basta una referencia viva para que la textura siga ocupando memoria.
+ *
+ * Por defecto es `inline`: para un canvas 2D abrir una pestana seria molestar
+ * sin ganar nada.
+ */
+export function opensInTab(entry: GameEntry): boolean {
+  return entry.launch === "tab";
 }
 
 /** Un juego `solo` se juega en el propio telefono; el resto manda un mando. */

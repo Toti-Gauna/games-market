@@ -211,4 +211,43 @@ describe("reparto de asientos", () => {
     expect(second.seat).toBe(2);
     expect(second.rejection).toBeNull();
   });
+
+  /*
+   * El QR no siempre sabe cuantos asientos tiene el juego.
+   *
+   * `asientos` viaja en la URL y salia de una preferencia del banco de
+   * pruebas, asi que podia quedar MENOR que los asientos reales del host. El
+   * celular usaba ese numero para acotar lo que pedia, con lo cual recortaba
+   * a 0 cualquier lugar que la persona tocara en la lista de libres: pedia de
+   * nuevo el asiento ocupado, lo rechazaban de nuevo, y la pantalla de elegir
+   * lugar volvia sola para siempre. Con `asientos=1` —el valor por defecto—
+   * era imposible conectar un segundo aparato.
+   *
+   * Quien manda sobre cuantos asientos hay es el host, y lo dice en cada
+   * respuesta.
+   */
+  it("puede tomar un asiento que el QR no sabia que existia", () => {
+    const bus = createBus();
+    make(bus, "host", { role: "host", seat: -1, seats: 4 });
+    make(bus, "a", { role: "client", seat: 0, seats: 4 });
+    const second = make(bus, "b", { role: "client", seat: 0, seats: 1 });
+
+    expect(second.rejection?.freeSeats).toEqual([1, 2, 3]);
+
+    second.claimSeat(2);
+
+    expect(second.status).toBe("live");
+    expect(second.seat).toBe(2);
+    expect(second.rejection).toBeNull();
+  });
+
+  it("un asiento que el host no tiene se rechaza por fuera de rango, no en silencio", () => {
+    const bus = createBus();
+    make(bus, "host", { role: "host", seat: -1, seats: 2 });
+    const phone = make(bus, "a", { role: "client", seat: 0, seats: 8 });
+
+    phone.claimSeat(7);
+
+    expect(phone.rejection?.reason).toBe("out-of-range");
+  });
 });

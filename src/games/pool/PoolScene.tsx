@@ -8,9 +8,10 @@ import {
   RigidBody,
 } from "@react-three/rapier";
 import type { RapierRigidBody } from "@react-three/rapier";
-import { Color, SphereGeometry, TorusGeometry } from "three";
+import { SphereGeometry, TorusGeometry } from "three";
 import type { InstancedMesh } from "three";
-import { getMaterial } from "@/core/engine3d/materials";
+import { getColor, getMaterial } from "@/core/engine3d/materials";
+import type { PaletteToken } from "@/core/engine/palette";
 import { createInstanceWriter, type InstanceWriter } from "@/core/engine3d/instancing";
 import {
   BALL_COUNT,
@@ -87,11 +88,23 @@ const MAX_IMPULSE = 0.62;
 /** Cuanto efecto vertical se le puede imprimir. */
 const MAX_SPIN_TORQUE = 0.0055;
 
-const BALL_COLOR: Record<string, string> = {
-  cue: "#f4f1ea",
-  solids: "#f2b134",
-  stripes: "#3aa3d6",
-  eight: "#15131d",
+/**
+ * El color de cada tipo de bola, **desde los tokens**.
+ *
+ * Ningun hex suelto: es la regla del proyecto y aca importa mas de lo que
+ * parece, porque una bola es un objeto de color plano y grande en pantalla —
+ * si el cian de la mesa no es el cian de la aplicacion, se nota al instante.
+ *
+ * La lectura sigue siendo la de un pool real: la blanca clara, la 8 casi
+ * negra, y los dos grupos en los colores de marca que ya separan equipos en
+ * el resto del catalogo. La forma es lo que de verdad los distingue —las
+ * rayadas llevan su anillo—, asi que el color no carga solo con esa tarea.
+ */
+const BALL_TOKEN: Record<string, PaletteToken> = {
+  cue: "--sn-text",
+  solids: "--sn-warn",
+  stripes: "--sn-cyan-400",
+  eight: "--sn-bg",
 };
 
 export type PoolSceneProps = {
@@ -273,12 +286,13 @@ function Balls({
   useEffect(() => {
     const mesh = meshRef.current;
     if (!mesh) return;
-    const color = new Color();
     for (let i = 0; i < BALL_COUNT; i++) {
       const ball = rack[i];
       if (!ball) continue;
-      color.set(BALL_COLOR[kindOf(ball.id)] ?? "#ffffff");
-      mesh.setColorAt(i, color);
+      const token = BALL_TOKEN[kindOf(ball.id)] ?? "--sn-text";
+      // `getColor` ya devuelve el token en espacio lineal, que es lo que
+      // espera `instanceColor`. Es compartido y de solo lectura: solo se lee.
+      mesh.setColorAt(i, getColor(token));
     }
     if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
   }, [rack]);

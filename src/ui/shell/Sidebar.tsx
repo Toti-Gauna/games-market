@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
 import { NavLink } from "react-router-dom";
+import { GameLaunchLink } from "@/ui/catalog/GameLaunchLink";
 import { CATEGORY_LABEL, isPlayable, type GameCategory, type GameEntry } from "@/core/contract/catalog";
 import { GAMES } from "@/games/registry";
 import { EffortChip, StatusDot } from "@/ui/catalog/badges";
@@ -10,7 +11,7 @@ import { EffortChip, StatusDot } from "@/ui/catalog/badges";
  * este patio de juegos.
  */
 
-const CATEGORY_ORDER: readonly GameCategory[] = ["retro", "modern", "corporate", "creative"];
+const CATEGORY_ORDER: readonly GameCategory[] = ["retro", "modern", "creative"];
 
 export type SidebarProps = {
   /** En movil el sidebar es un cajon; en escritorio esta siempre. */
@@ -131,14 +132,11 @@ function ShellLink({
 function GameLink({ game, onNavigate }: { game: GameEntry; onNavigate?: () => void }) {
   const playable = isPlayable(game);
   return (
-    <NavLink
-      to={`/juego/${game.id}`}
+    <GameLaunchLink
+      game={game}
       onClick={onNavigate}
-      className={({ isActive }) =>
-        `group flex items-center gap-2 rounded-sn px-2 py-1.5 transition-colors ${
-          isActive ? "bg-sn-panel-hi" : "hover:bg-sn-panel"
-        }`
-      }
+      className="group flex items-center gap-2 rounded-sn px-2 py-1.5 transition-colors hover:bg-sn-panel"
+      activeClassName="bg-sn-panel-hi"
       title={game.tagline}
     >
       <StatusDot status={game.status} />
@@ -151,6 +149,6 @@ function GameLink({ game, onNavigate }: { game: GameEntry; onNavigate?: () => vo
         {game.title}
       </span>
       <EffortChip entry={game} />
-    </NavLink>
+    </GameLaunchLink>
   );
 }

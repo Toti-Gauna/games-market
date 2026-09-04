@@ -6,6 +6,7 @@ import type { GameOutcome, GameProps, GameRuntimeConfig } from "@/core/contract/
 import { loadLabPreferences, loadSettings } from "@/core/admin/settingsStore";
 import { randomSeed } from "@/core/engine/rng";
 import { GAMES } from "@/games/registry";
+import { useFullscreen } from "@/ui/game/useFullscreen";
 
 /**
  * Modo quiosco.
@@ -197,25 +198,26 @@ function KioskRun({ entry, onExit }: { entry: GameEntry; onExit: () => void }) {
 }
 
 function FullscreenButton() {
-  const [active, setActive] = useState(false);
+  /*
+   * Aca el objetivo es la pagina entera y no el encuadre de un juego: el
+   * quiosco es el modo de un stand, y lo que tiene que desaparecer es el
+   * navegador, no lo que rodea al canvas. La mecanica —el gesto obligatorio,
+   * Escape, los navegadores que no lo implementan— es la misma que la del
+   * escenario y vive una sola vez en `useFullscreen`.
+   */
+  const documentRef = useRef(typeof document === "undefined" ? null : document.documentElement);
+  const fullscreen = useFullscreen(documentRef);
 
-  useEffect(() => {
-    const onChange = () => setActive(document.fullscreenElement !== null);
-    document.addEventListener("fullscreenchange", onChange);
-    onChange();
-    return () => document.removeEventListener("fullscreenchange", onChange);
-  }, []);
-
-  const toggle = useCallback(() => {
-    // Los navegadores solo lo permiten dentro de un gesto del usuario, por eso
-    // esto es un boton y no algo que el modo quiosco haga solo al entrar.
-    if (document.fullscreenElement) void document.exitFullscreen();
-    else void document.documentElement.requestFullscreen().catch(() => undefined);
-  }, []);
+  if (!fullscreen.supported) return null;
 
   return (
-    <button type="button" className="sn-btn text-[11px]" onClick={toggle} aria-pressed={active}>
-      {active ? "Salir de pantalla completa" : "Pantalla completa"}
+    <button
+      type="button"
+      className="sn-btn text-[11px]"
+      onClick={fullscreen.toggle}
+      aria-pressed={fullscreen.active}
+    >
+      {fullscreen.active ? "Salir de pantalla completa" : "Pantalla completa"}
     </button>
   );
 }
