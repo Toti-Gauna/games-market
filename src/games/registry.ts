@@ -461,18 +461,28 @@ export const GAMES: readonly GameEntry[] = [
     // 3D en pestana propia: no compite por el hilo principal con el catalogo,
     // y cerrarla libera el contexto de GPU. Ver opensInTab.
     launch: "tab",
-    status: "planned",
+    /*
+     * `draft` y no `beta`: lo que hay implementado es la fase 1 de 7 —la
+     * prueba de rendimiento que la guia exige antes de escribir gameplay—, no
+     * el juego. Se puede abrir desde el banco de pruebas justamente para
+     * medirlo en un celular, que es la puerta para seguir.
+     */
+    status: "draft",
     effort: "XL",
     batch: 11,
     enabled: false,
     needsNet: true,
     minPlayers: 2,
     maxPlayers: 10,
-    inputs: ["touch", "keyboard"],
+    // Sin inclinacion y sin teclado: la guia fija stick tactil y arrastre.
+    inputs: ["touch"],
     estimatedMin: 8,
-    tags: ["shooter", "BVH", "el más caro"],
+    // `three-mesh-bvh` NO se usa: el hitscan va contra diez capsulas, y una
+    // lista de AABB es mas rapida que construir un BVH. Lo corrige la guia.
+    tags: ["shooter", "battle royale", "el más caro"],
     guide: "X4-SHOOTER-3D.md",
     settings: [],
+    load: () => import("./shooter/ShooterGame"),
   },
 ];
 
