@@ -176,6 +176,9 @@ export default function VerdaderoOFalsoGame({ config, signal, onFinish, onReady 
    */
   const netHandle = useGameNet<ControlInput, never>({
     roomId: config.roomId,
+    // Lo elige el contenedor, igual que la sala: el celular entra por donde
+    // dice el QR y el proyector tiene que estar en la misma red.
+    transport: config.transport,
     role: "host",
     // -1 = el proyector no juega. Todos los asientos son de la sala.
     seat: -1,

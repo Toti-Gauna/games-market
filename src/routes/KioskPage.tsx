@@ -96,7 +96,9 @@ function KioskRun({ entry, onExit }: { entry: GameEntry; onExit: () => void }) {
   }, [entry.id]);
 
   const config: GameRuntimeConfig = useMemo(
-    () => ({ roomId: `kiosk-${entry.id}`, seed, durationMs, seat: 0, isHost: true, playerCount: 1, settings, debug: false }),
+    // `local`: el quiosco es de a uno contra la maquina y no reparte QR, asi
+    // que no tiene con quien hablar por WebRTC.
+    () => ({ roomId: `kiosk-${entry.id}`, seed, durationMs, seat: 0, isHost: true, playerCount: 1, transport: "local" as const, settings, debug: false }),
     [entry.id, seed, durationMs, settings],
   );
 

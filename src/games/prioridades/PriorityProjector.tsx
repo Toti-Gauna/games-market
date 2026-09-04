@@ -112,6 +112,9 @@ export default function PriorityProjector({ config, signal, onFinish, onReady }:
    */
   const netHandle = useGameNet<PriorityInput, PriorityNetState>({
     roomId: config.roomId,
+    // Lo elige el contenedor, igual que la sala: el celular entra por donde
+    // dice el QR y el proyector tiene que estar en la misma red.
+    transport: config.transport,
     role: "host",
     // -1 = el proyector no juega. Los 40 asientos son todos de la sala.
     seat: -1,

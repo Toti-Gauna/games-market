@@ -72,6 +72,9 @@ export default function PriorityPhone({ config, signal, onFinish, onReady }: Gam
 
   const netHandle = useGameNet<PriorityInput, PriorityNetState>({
     roomId: config.roomId,
+    // Lo elige el contenedor, igual que la sala: el celular entra por donde
+    // dice el QR y el proyector tiene que estar en la misma red.
+    transport: config.transport,
     role: "client",
     /* El proyector se queda con el asiento 0 del contenedor —es el que trae
        `isHost`— asi que las personas entran desde el 1 y aca se les descuenta:

@@ -126,6 +126,9 @@ export default function CorredorGame({ config, signal, onFinish }: GameProps) {
 
   const net = useGameNet<{ d: number; s: number }, never>({
     roomId: config.roomId,
+    // Lo elige el contenedor, igual que la sala: el celular entra por donde
+    // dice el QR y el proyector tiene que estar en la misma red.
+    transport: config.transport,
     role: config.seat === 0 ? "host" : "client",
     seat: Math.max(0, config.seat),
     seats: 30,

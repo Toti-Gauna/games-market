@@ -213,6 +213,9 @@ export default function TriviaGame({ config, signal, onFinish }: GameProps) {
   const netHandle = useGameNet<ControlInput, never>({
     // La sala la elige el contenedor: es la que esta en el QR que escanean.
     roomId: config.roomId,
+    // Lo elige el contenedor, igual que la sala: el celular entra por donde
+    // dice el QR y el proyector tiene que estar en la misma red.
+    transport: config.transport,
     role: "host",
     // -1 = proyector que no juega. Los 40 asientos quedan para los celulares.
     seat: -1,

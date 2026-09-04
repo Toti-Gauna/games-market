@@ -1,5 +1,5 @@
 import type { ComponentType } from "react";
-import type { NetPort } from "./net";
+import type { NetPort, NetTransportKind } from "./net";
 import type { SettingsValues } from "./settings";
 
 /**
@@ -44,6 +44,16 @@ export type GameRuntimeConfig = {
    */
   isHost: boolean;
   playerCount: number;
+  /**
+   * Por donde arma la red el juego.
+   *
+   * Lo elige el contenedor, igual que `roomId`, y por la misma razon: tiene
+   * que coincidir con lo que escanea el celular. Un juego que arma su propia
+   * sesion con `useGameNet` **tiene que pasarlo**; si no, el proyector abre un
+   * BroadcastChannel mientras el telefono entra por WebRTC y el mando se queda
+   * en "Conectando…" para siempre, sin ningun error que lo explique.
+   */
+  transport: NetTransportKind;
   /** Ya viene mezclado con los defaults del schema: nunca falta una clave. */
   settings: SettingsValues;
   /** true cuando corre en el banco de pruebas: habilita overlays de debug. */

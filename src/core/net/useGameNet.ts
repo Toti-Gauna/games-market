@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { DEFAULT_CONDITIONS } from "@/core/contract/gameNet";
 import type { NetConditions, NetPlayer, NetRole } from "@/core/contract/gameNet";
+import type { NetTransportKind } from "@/core/contract/net";
 import { createSnapshotBuffer, type SnapshotBuffer } from "./interpolation";
 import {
   createMockNet,
@@ -15,11 +16,10 @@ import { createPeerTransport } from "./peerNet";
 import type { NetStateCodec } from "./snapshot";
 
 /**
- * `local` = BroadcastChannel: dos pestanas de la misma maquina. Alcanza para
- * desarrollar y es lo que usa el banco de pruebas por defecto.
- * `webrtc` = celulares de verdad contra el proyector. **Requiere HTTPS.**
+ * El tipo vive en el contrato: lo elige el contenedor y lo tiene que leer el
+ * juego. Se reexporta para no romper a quien ya lo importaba desde aca.
  */
-export type NetTransportKind = "local" | "webrtc";
+export type { NetTransportKind } from "@/core/contract/net";
 
 /**
  * El hook que arma la red y le da al juego un `GameNetPort` listo.

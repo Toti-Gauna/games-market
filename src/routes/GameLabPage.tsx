@@ -182,10 +182,13 @@ function GameLab({ entry }: { entry: GameEntry }) {
       // El asiento 0 es el proyector. El contenedor lo decide; el juego lo lee.
       isHost: prefs.seat === 0,
       playerCount: prefs.playerCount,
+      // El mismo que viaja en el QR. Si el proyector y el celular no coinciden
+      // aca, no hay forma de que se vean.
+      transport: prefs.transport,
       settings,
       debug: true,
     }),
-    [entry.id, runSeed, prefs.durationSec, prefs.seat, prefs.playerCount, settings],
+    [entry.id, runSeed, prefs.durationSec, prefs.seat, prefs.playerCount, prefs.transport, settings],
   );
 
   const GameComponent = useMemo(

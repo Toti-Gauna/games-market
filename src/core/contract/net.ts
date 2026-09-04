@@ -8,6 +8,22 @@
 
 export type NetRole = "host" | "client";
 
+/**
+ * Por donde viajan los bytes.
+ *
+ * `local` = BroadcastChannel: dos pestanas del MISMO navegador. Alcanza para
+ * desarrollar y no cruza a otro aparato ni por casualidad.
+ * `webrtc` = celulares de verdad contra el proyector. Requiere HTTPS.
+ *
+ * Vive en el contrato y no en `useGameNet` porque **el juego tiene que poder
+ * leerlo**: quien elige el transporte es el contenedor (el banco de pruebas,
+ * el quiosco), y el juego arma su propia sesion de red. Si el dato no llega
+ * hasta ahi, el proyector abre un BroadcastChannel mientras el celular entra
+ * por WebRTC, y no se ven nunca — que es exactamente el sintoma de
+ * "Conectando…" para siempre.
+ */
+export type NetTransportKind = "local" | "webrtc";
+
 export type NetPeer = {
   id: string;
   seat: number;

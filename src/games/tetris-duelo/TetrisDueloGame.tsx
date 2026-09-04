@@ -364,6 +364,9 @@ export default function TetrisDueloGame({ config, signal, onFinish }: GameProps)
     // La sala la elige el contenedor: tiene que coincidir con el QR que
     // escanean los celulares.
     roomId: config.roomId,
+    // Lo elige el contenedor, igual que la sala: el celular entra por donde
+    // dice el QR y el proyector tiene que estar en la misma red.
+    transport: config.transport,
     role: "host",
     // -1 = proyector que no juega. Los dos tableros son de los celulares.
     seat: -1,

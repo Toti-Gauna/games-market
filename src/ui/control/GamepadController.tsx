@@ -12,6 +12,7 @@ import type {
 } from "@/core/contract/control";
 import { prefersReducedMotion } from "@/core/engine/palette";
 import { vibrate } from "@/core/engine/audio";
+import { clampToTable, cueBallOf, overlapsBall, projectAim } from "./aim";
 import { useWakeLock } from "./useWakeLock";
 
 /**
@@ -70,6 +71,7 @@ export function GamepadController({ spec, seat, onInput, status, connected }: Ga
       )}
       {spec.layout === "buttons" && <ButtonsBody spec={spec} onInput={onInput} />}
       {spec.layout === "pad" && <PadBody spec={spec} accent={accent} onInput={onInput} />}
+      {spec.layout === "aim" && <AimBody spec={spec} accent={accent} onInput={onInput} />}
       {spec.layout === "draw" && <DrawBody spec={spec} onInput={onInput} />}
       {spec.layout === "text" && <TextBody spec={spec} onInput={onInput} />}
     </div>
@@ -329,6 +331,422 @@ function ShapeIcon({ shape, color }: { shape: OptionShape; color: string }) {
 }
 
 /* ------------------------------------------------------------------ */
+
+type AimSpec = Extract<ControlSpec, { layout: "aim" }>;
+
+/** Cuanto tarda la barra de fuerza en llenarse. */
+const CHARGE_MS = 1100;
+
+/** Tope del zoom con dos dedos. Mas que esto y se pierde la mesa de vista. */
+const MAX_ZOOM = 5;
+
+const BALL_FILL = {
+  cue: "#f4f1ea",
+  solids: "var(--sn-cyan-400)",
+  stripes: "var(--sn-magenta-400)",
+  eight: "#14121c",
+} as const;
+
+/**
+ * El taco.
+ *
+ * Es el unico layout que dibuja una escena, y aun asi son circulos en un SVG:
+ * el telefono no renderiza una sola cara 3D. Todo el 3D pasa en el proyector,
+ * que es la maquina buena.
+ *
+ * Tres decisiones que hacen que se pueda apuntar de verdad:
+ *
+ * 1. **Se apunta senalando, no girando.** Arrastrar mueve la mira al punto que
+ *    toca el dedo y la direccion sale de la blanca hacia ahi. Un gesto de
+ *    "girar" acumula error en cada arrastre y obliga a corregir de a poco.
+ * 2. **El zoom es el ajuste fino.** El `viewBox` se achica alrededor de la
+ *    blanca, asi que acercar los dedos no solo agranda: multiplica la
+ *    precision del mismo gesto, porque el pixel del dedo vale menos mesa. Sin
+ *    esto, apuntarle a una bola en el otro extremo es adivinar.
+ * 3. **La conversion de coordenadas sale del `viewBox`.** Es una sola cuenta y
+ *    vale para cualquier zoom, en vez de un factor de escala aparte que hay
+ *    que mantener sincronizado con lo que se dibuja.
+ */
+function AimBody({
+  spec,
+  accent,
+  onInput,
+}: {
+  spec: AimSpec;
+  accent: string;
+  onInput: (input: ControlInput) => void;
+}) {
+  const { table } = spec;
+  const maxZ = 1 / table.aspect;
+
+  const svgRef = useRef<SVGSVGElement | null>(null);
+  const [angle, setAngle] = useState(0);
+  const [spin, setSpin] = useState(0);
+  const [zoom, setZoom] = useState(1);
+  const [power, setPower] = useState(0);
+  const [charging, setCharging] = useState(false);
+
+  useHaptic(spec.haptic);
+
+  const onInputRef = useRef(onInput);
+  onInputRef.current = onInput;
+
+  const cue = cueBallOf(table);
+  const reduced = prefersReducedMotion();
+
+  /*
+   * El `viewBox` se centra en la blanca y se achica con el zoom, pero nunca
+   * se sale de la mesa: sin el encierro, acercarse a una bola contra la banda
+   * mostraria medio rectangulo vacio.
+   */
+  const viewW = 1 / zoom;
+  const viewH = maxZ / zoom;
+  const viewX = cue ? clampRange(cue.x - viewW / 2, 0, 1 - viewW) : 0;
+  const viewZ = cue ? clampRange(cue.z - viewH / 2, 0, maxZ - viewH) : 0;
+
+  /** Pantalla a coordenadas de mesa. Una cuenta, y sirve para cualquier zoom. */
+  const toTable = useCallback(
+    (clientX: number, clientY: number) => {
+      const rect = svgRef.current?.getBoundingClientRect();
+      if (!rect || rect.width === 0 || rect.height === 0) return null;
+      return {
+        x: viewX + ((clientX - rect.left) / rect.width) * viewW,
+        z: viewZ + ((clientY - rect.top) / rect.height) * viewH,
+      };
+    },
+    [viewX, viewZ, viewW, viewH],
+  );
+
+  /*
+   * Los punteros activos, para el pellizco. Se guardan en una ref y no en
+   * estado: cambian en cada `pointermove` y no hay nada que redibujar por
+   * cada uno.
+   */
+  const pointersRef = useRef(new Map<number, { x: number; y: number }>());
+  const pinchRef = useRef<{ distance: number; zoom: number } | null>(null);
+
+  const handlePointerDown = useCallback(
+    (event: React.PointerEvent<SVGSVGElement>) => {
+      if (!spec.enabled) return;
+      event.currentTarget.setPointerCapture(event.pointerId);
+      pointersRef.current.set(event.pointerId, { x: event.clientX, y: event.clientY });
+
+      if (pointersRef.current.size === 2) {
+        const [a, b] = [...pointersRef.current.values()];
+        pinchRef.current = { distance: Math.hypot(a!.x - b!.x, a!.y - b!.y), zoom };
+        return;
+      }
+
+      const point = toTable(event.clientX, event.clientY);
+      if (!point || !cue) return;
+
+      /*
+       * Bola en mano: el primer toque coloca la blanca en vez de apuntar. Es
+       * lo unico que cambia el gesto, y por eso el cartel de "bola en mano"
+       * tiene que estar visible.
+       */
+      if (spec.ballInHand) {
+        const placed = clampToTable(table, point);
+        if (!overlapsBall(table, placed)) {
+          onInputRef.current({ kind: "place", x: placed.x, z: placed.z });
+        }
+        return;
+      }
+
+      setAngle(Math.atan2(point.z - cue.z, point.x - cue.x));
+    },
+    [spec.enabled, spec.ballInHand, table, toTable, cue, zoom],
+  );
+
+  const handlePointerMove = useCallback(
+    (event: React.PointerEvent<SVGSVGElement>) => {
+      if (!spec.enabled || !pointersRef.current.has(event.pointerId)) return;
+      pointersRef.current.set(event.pointerId, { x: event.clientX, y: event.clientY });
+
+      const pinch = pinchRef.current;
+      if (pointersRef.current.size === 2 && pinch) {
+        const [a, b] = [...pointersRef.current.values()];
+        const distance = Math.hypot(a!.x - b!.x, a!.y - b!.y);
+        if (pinch.distance > 0) {
+          setZoom(clampRange((distance / pinch.distance) * pinch.zoom, 1, MAX_ZOOM));
+        }
+        return;
+      }
+
+      if (spec.ballInHand || !cue) return;
+      const point = toTable(event.clientX, event.clientY);
+      if (point) setAngle(Math.atan2(point.z - cue.z, point.x - cue.x));
+    },
+    [spec.enabled, spec.ballInHand, toTable, cue],
+  );
+
+  const handlePointerUp = useCallback((event: React.PointerEvent<SVGSVGElement>) => {
+    pointersRef.current.delete(event.pointerId);
+    if (pointersRef.current.size < 2) pinchRef.current = null;
+  }, []);
+
+  /*
+   * La barra de fuerza.
+   *
+   * Se llena en `CHARGE_MS` y se queda arriba en vez de rebotar. Un medidor
+   * que sube y baja es mas exigente, y en un evento donde la mitad de la sala
+   * no juega al pool solo produce tiros al azar: si se paso, se espera y se
+   * suelta al toque.
+   */
+  useEffect(() => {
+    if (!charging) return;
+    let raf = 0;
+    const startedAt = performance.now();
+    const tick = () => {
+      setPower(Math.min(1, (performance.now() - startedAt) / CHARGE_MS));
+      raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [charging]);
+
+  const release = useCallback(() => {
+    if (!charging) return;
+    setCharging(false);
+    // Un roce sin carga no es un tiro: seria un toque de fuerza cero que
+    // gasta el turno sin mover nada.
+    if (power > 0.05) {
+      if (!reduced) vibrate(25);
+      onInputRef.current({ kind: "shoot", angle, power, spin });
+    }
+    setPower(0);
+  }, [charging, power, angle, spin, reduced]);
+
+  const shot = projectAim(table, angle);
+
+  return (
+    <div className="flex min-h-0 flex-1 flex-col gap-3 px-3 pb-3">
+      {spec.title && (
+        <h2 className="shrink-0 text-center text-sm font-medium text-sn-text">{spec.title}</h2>
+      )}
+      {spec.status && spec.status.length > 0 && <PadStatus items={spec.status} />}
+
+      {spec.remainingMs !== undefined && spec.windowMs !== undefined && spec.windowMs > 0 && (
+        <div className="h-1 shrink-0 overflow-hidden rounded-full bg-sn-line-soft">
+          <div
+            className="h-full rounded-full transition-[width] duration-200"
+            style={{
+              width: `${clampRange(spec.remainingMs / spec.windowMs, 0, 1) * 100}%`,
+              background: accent,
+            }}
+          />
+        </div>
+      )}
+
+      {(spec.notice || spec.ballInHand) && (
+        <p
+          className="shrink-0 rounded-sn border border-sn-line-soft bg-sn-bg-elev px-3 py-2 text-center text-xs text-sn-muted"
+          aria-live="polite"
+        >
+          {spec.notice ?? "Bola en mano: tocá la mesa para colocar la blanca."}
+        </p>
+      )}
+
+      <div
+        className="min-h-0 flex-1"
+        style={{ opacity: spec.enabled ? 1 : 0.45, transition: reduced ? undefined : "opacity 150ms" }}
+      >
+        <svg
+          ref={svgRef}
+          viewBox={`${viewX} ${viewZ} ${viewW} ${viewH}`}
+          className="h-full w-full touch-none rounded-sn border border-sn-line-soft"
+          style={{ aspectRatio: String(table.aspect), background: "#0f3b2e" }}
+          role="application"
+          aria-label="Mesa de pool. Arrastrá para apuntar, acercá los dedos para el ajuste fino."
+          onPointerDown={handlePointerDown}
+          onPointerMove={handlePointerMove}
+          onPointerUp={handlePointerUp}
+          onPointerCancel={handlePointerUp}
+        >
+          {table.pockets.map((pocket, index) => (
+            <circle
+              key={index}
+              cx={pocket.x}
+              cy={pocket.z}
+              r={table.pocketRadius}
+              fill="#0a0a12"
+            />
+          ))}
+
+          {/* La linea del tiro, en el color del jugador. Sin ella el juego es
+              adivinar, y esto es exactamente lo que la guia pide mostrar. */}
+          {cue && spec.enabled && (
+            <>
+              <line
+                x1={cue.x}
+                y1={cue.z}
+                x2={shot.end.x}
+                y2={shot.end.z}
+                stroke={accent}
+                strokeWidth={table.ballRadius * 0.25}
+                strokeDasharray={`${table.ballRadius} ${table.ballRadius}`}
+              />
+              {/* Donde queda la blanca al tocar. */}
+              <circle
+                cx={shot.end.x}
+                cy={shot.end.z}
+                r={table.ballRadius}
+                fill="none"
+                stroke={accent}
+                strokeWidth={table.ballRadius * 0.12}
+                opacity={0.7}
+              />
+              {shot.hitDir && (
+                <line
+                  x1={shot.end.x}
+                  y1={shot.end.z}
+                  x2={shot.end.x + shot.hitDir.x * table.ballRadius * 6}
+                  y2={shot.end.z + shot.hitDir.z * table.ballRadius * 6}
+                  stroke="var(--sn-warn)"
+                  strokeWidth={table.ballRadius * 0.2}
+                  opacity={0.85}
+                />
+              )}
+            </>
+          )}
+
+          {table.balls.map((ball) => (
+            <g key={ball.id}>
+              <circle
+                cx={ball.x}
+                cy={ball.z}
+                r={table.ballRadius}
+                fill={BALL_FILL[ball.kind]}
+                stroke={table.own !== null && ball.kind === table.own ? accent : "#00000055"}
+                strokeWidth={table.ballRadius * 0.16}
+              />
+              {ball.kind !== "cue" && (
+                <text
+                  x={ball.x}
+                  y={ball.z}
+                  textAnchor="middle"
+                  dominantBaseline="central"
+                  fontSize={table.ballRadius * 1.1}
+                  fill={ball.kind === "eight" ? "#f4f1ea" : "#14121c"}
+                >
+                  {ball.id}
+                </text>
+              )}
+            </g>
+          ))}
+        </svg>
+      </div>
+
+      <SpinDial spin={spin} accent={accent} enabled={spec.enabled} onChange={setSpin} />
+
+      <div className="shrink-0">
+        <div className="mb-1 h-2 overflow-hidden rounded-full bg-sn-line-soft">
+          <div
+            className="h-full rounded-full"
+            style={{ width: `${power * 100}%`, background: accent }}
+          />
+        </div>
+        <button
+          type="button"
+          disabled={!spec.enabled}
+          className="w-full rounded-sn border px-3 py-4 text-base font-semibold transition-colors disabled:opacity-40"
+          style={{
+            borderColor: accent,
+            background: charging ? accent : "transparent",
+            color: charging ? "var(--sn-bg)" : accent,
+          }}
+          onPointerDown={() => spec.enabled && setCharging(true)}
+          onPointerUp={release}
+          onPointerLeave={release}
+          onPointerCancel={release}
+        >
+          {charging ? "Soltá para pegar" : "PEGAR"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * El efecto vertical.
+ *
+ * Un circulo que representa la blanca vista de frente: arriba del centro es
+ * corrida, abajo retroceso. **No hay eje horizontal a proposito.** Con efecto
+ * lateral el pool es injugable para quien no juega al pool, y con este solo
+ * se explica en una frase.
+ */
+function SpinDial({
+  spin,
+  accent,
+  enabled,
+  onChange,
+}: {
+  spin: number;
+  accent: string;
+  enabled: boolean;
+  onChange: (next: number) => void;
+}) {
+  const ref = useRef<HTMLDivElement | null>(null);
+
+  const pick = useCallback(
+    (clientY: number) => {
+      const rect = ref.current?.getBoundingClientRect();
+      if (!rect || rect.height === 0) return;
+      // Arriba de la pantalla es corrida, asi que el eje se invierte.
+      const ratio = 1 - ((clientY - rect.top) / rect.height) * 2;
+      onChange(clampRange(ratio, -1, 1));
+    },
+    [onChange],
+  );
+
+  const label = spin > 0.15 ? "corrida" : spin < -0.15 ? "retroceso" : "centro";
+
+  return (
+    <div className="flex shrink-0 items-center gap-3">
+      <div
+        ref={ref}
+        className="size-16 shrink-0 touch-none rounded-full border"
+        style={{ borderColor: enabled ? accent : "var(--sn-line-soft)", opacity: enabled ? 1 : 0.4 }}
+        role="slider"
+        aria-label="Efecto vertical"
+        aria-valuemin={-1}
+        aria-valuemax={1}
+        aria-valuenow={Number(spin.toFixed(2))}
+        aria-valuetext={label}
+        tabIndex={0}
+        onPointerDown={(event) => {
+          if (!enabled) return;
+          event.currentTarget.setPointerCapture(event.pointerId);
+          pick(event.clientY);
+        }}
+        onPointerMove={(event) => {
+          if (!enabled || event.buttons === 0) return;
+          pick(event.clientY);
+        }}
+        onKeyDown={(event) => {
+          if (!enabled) return;
+          if (event.key === "ArrowUp") onChange(clampRange(spin + 0.1, -1, 1));
+          if (event.key === "ArrowDown") onChange(clampRange(spin - 0.1, -1, 1));
+        }}
+      >
+        <div className="relative h-full w-full">
+          <div
+            className="absolute left-1/2 size-3 -translate-x-1/2 -translate-y-1/2 rounded-full"
+            style={{ top: `${(1 - spin) * 50}%`, background: accent }}
+          />
+        </div>
+      </div>
+      <div className="min-w-0">
+        <div className="text-[10px] uppercase tracking-wider text-sn-dim">Efecto</div>
+        <div className="text-sm text-sn-text">{label}</div>
+      </div>
+    </div>
+  );
+}
+
+function clampRange(value: number, min: number, max: number): number {
+  return Math.min(Math.max(value, min), max);
+}
 
 type PadSpec = Extract<ControlSpec, { layout: "pad" }>;
 

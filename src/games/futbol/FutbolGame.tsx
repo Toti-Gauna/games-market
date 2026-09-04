@@ -517,6 +517,9 @@ export default function FutbolGame({ config, signal, onFinish }: GameProps) {
     // La sala la elige el contenedor porque tiene que coincidir con el QR que
     // escanean los celulares.
     roomId: config.roomId,
+    // Lo elige el contenedor, igual que la sala: el celular entra por donde
+    // dice el QR y el proyector tiene que estar en la misma red.
+    transport: config.transport,
     role: isHost ? "host" : "client",
     // El host ya no es un proyector que mira: juega el asiento 0. Con eso su
     // input entra por el mismo `sendInput` que el de un celular y desaparece la

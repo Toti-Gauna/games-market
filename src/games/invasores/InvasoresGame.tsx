@@ -428,6 +428,9 @@ export default function InvasoresGame({ config, net, signal, onFinish }: GamePro
     // La sala la elige el contenedor porque tiene que coincidir con el QR que
     // escanean los celulares. Si el juego inventara una, no se verian.
     roomId: config.roomId,
+    // Lo elige el contenedor, igual que la sala: el celular entra por donde
+    // dice el QR y el proyector tiene que estar en la misma red.
+    transport: config.transport,
     role: "host",
     // -1 = proyector que no juega. Los cuatro asientos quedan para los celulares.
     seat: -1,

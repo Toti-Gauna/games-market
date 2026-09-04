@@ -63,9 +63,75 @@ export type ControlSlider = {
   markers?: ReadonlyArray<{ at: number; label: string; tone?: "default" | "warn" }>;
 };
 
+/**
+ * Una bola en la vista cenital del que apunta.
+ *
+ * El celular **no renderiza 3D**: recibe circulos en un plano y los dibuja.
+ * Es lo que hace que el mando de un juego 3D cueste lo mismo que el de Pong.
+ */
+export type AimBall = {
+  id: number;
+  x: number;
+  z: number;
+  /** Como pintarla. El mando no sabe de reglas, solo de colores. */
+  kind: "cue" | "solids" | "eight" | "stripes";
+};
+
+/**
+ * La mesa como la ve el que apunta.
+ *
+ * **Las dos coordenadas se normalizan con la misma escala**, la del lado
+ * largo: `x` va de 0 a 1 y `z` de 0 a `1 / aspect`. Normalizar cada eje por su
+ * propio lado seria mas comodo de escribir y estaria mal: con escalas
+ * distintas las bolas dejan de ser circulos y la linea de tiro proyectada no
+ * coincide con la trayectoria real, que es el criterio de aceptacion 5.
+ */
+export type AimTable = {
+  balls: readonly AimBall[];
+  /** Largo dividido ancho. El mando dibuja el rectangulo con esto. */
+  aspect: number;
+  /** Radio de bola en la misma escala que `x`. */
+  ballRadius: number;
+  pockets: readonly { x: number; z: number }[];
+  /** Boca del bolsillo, misma escala. */
+  pocketRadius: number;
+  /** El grupo propio ya asignado. `null` con la mesa abierta. */
+  own: "solids" | "stripes" | "eight" | null;
+};
+
 export type ControlSpec =
   /** Todavia no hay nada que hacer: esperando al proyector o entre rondas. */
   | { layout: "wait"; message: string }
+  /**
+   * El taco.
+   *
+   * Vista cenital de la mesa, efecto vertical y una barra de fuerza que se
+   * llena manteniendo apretado. Es el unico layout que muestra una escena, y
+   * aun asi son circulos en 2D: el telefono no dibuja una sola cara 3D.
+   *
+   * El zoom con dos dedos no es un lujo. Sin ajuste fino, apuntarle a una bola
+   * en el otro extremo de la mesa desde una pantalla de 6 pulgadas es
+   * imposible, y el juego pasa a ser adivinar.
+   */
+  | {
+      layout: "aim";
+      /** "Tu turno", "Esperando a que la mesa se aquiete". */
+      title?: string;
+      table: AimTable;
+      /** false mientras la mesa se mueve o no es su turno. */
+      enabled: boolean;
+      /**
+       * Puede arrastrar la blanca antes de apuntar: el rival cometio falta.
+       * Es la unica compensacion del juego y hay que verla, no deducirla.
+       */
+      ballInHand: boolean;
+      status?: readonly ControlStatus[];
+      notice?: string;
+      /** Para la barra del turno de 45 s. */
+      remainingMs?: number;
+      windowMs?: number;
+      haptic?: ControlHaptic;
+    }
   | { layout: "paddle"; orientation: "vertical" | "horizontal" }
   | {
       layout: "buttons";
@@ -188,6 +254,25 @@ export type ControlInput =
     }
   /** Deshacer y borrar viajan como evento, no como un redibujado. */
   | { kind: "canvas"; action: "undo" | "clear" }
+  /**
+   * El tiro. Un solo mensaje por turno, y por eso el pool no necesita netcode
+   * en tiempo real: se manda esto y se recibe el resultado, como en Ludo.
+   */
+  | {
+      kind: "shoot";
+      /** Radianes. 0 apunta hacia el lado positivo del eje largo. */
+      angle: number;
+      /** 0..1. Lo que se cargo con la barra. */
+      power: number;
+      /**
+       * Efecto vertical, -1..1. Negativo es pegarle abajo (retroceso) y
+       * positivo arriba (corrida). **No hay efecto lateral**: con el completo
+       * el juego es injugable para quien no juega al pool.
+       */
+      spin: number;
+    }
+  /** Colocar la blanca con bola en mano. Coordenadas de `AimTable`. */
+  | { kind: "place"; x: number; z: number }
   | { kind: "text"; value: string }
   /** "Ana esta escribiendo", sin decir que. */
   | { kind: "typing" };
