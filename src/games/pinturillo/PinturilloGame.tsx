@@ -1,6 +1,7 @@
 import { getStroke } from "perfect-freehand";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import type { ControlInput, ControlSpec, StrokePoint } from "@/core/contract/control";
+import { SKETCH_ASPECT } from "@/core/contract/control";
 import type { GameProps } from "@/core/contract/game";
 import { useDeadline } from "@/core/corporate/hooks";
 import { LiveRankingTable } from "@/core/corporate/LiveStage";
@@ -300,9 +301,11 @@ export default function PinturilloGame({ config, signal, onFinish }: GameProps) 
     (ctx: CanvasRenderingContext2D, stroke: Stroke, width: number, height: number, live: boolean) => {
       if (stroke.points.length === 0) return;
       // Los puntos vienen normalizados 0..1, asi que el dibujo escala solo a
-      // cualquier resolucion. El grosor va contra el lado corto para que no se
-      // deforme cuando el proyector no es cuadrado.
-      const scale = Math.min(width, height) / 1000;
+      // cualquier resolucion. El grosor va contra el ancho, la misma
+      // referencia que usa el celular para pintar su vista previa: con el
+      // lienzo ya encuadrado en la proporcion del contrato, medir contra el
+      // lado corto daria un trazo mas fino de un lado que del otro.
+      const scale = width / 1000;
       const hasPressure = stroke.points[0]?.p !== undefined;
       const input = stroke.points.map((point) => [point.x * width, point.y * height, point.p ?? 0.5]);
 
@@ -1345,20 +1348,38 @@ export default function PinturilloGame({ config, signal, onFinish }: GameProps) 
             {view.phase === "cierre" && !view.cancelled ? view.word : view.hint || " "}
           </p>
 
-          <div
-            ref={boardBoxRef}
-            className="relative min-h-0 flex-1 overflow-hidden rounded-sn-lg border border-sn-line-soft"
-            style={{ background: BOARD_COLOR }}
-          >
-            {/* Dos canvas apilados: abajo el cache con los trazos cerrados,
-                pintados una sola vez; arriba solo el trazo en curso. Es lo que
-                sostiene 60 fps con 120 trazos. */}
-            <canvas ref={baseCanvasRef} className="absolute inset-0 h-full w-full" aria-label="Dibujo" />
-            <canvas ref={liveCanvasRef} className="absolute inset-0 h-full w-full" aria-hidden="true" />
+          {/* El lienzo se encuadra con la proporcion del contrato y se centra
+              en lo que sobre. Antes se estiraba a todo el hueco disponible, y
+              como el celular dibuja sobre otra proporcion, lo que se hacia
+              redondo en la mano llegaba al proyector aplastado. Vale mas dejar
+              aire al costado que deformar el dibujo. */}
+          <div className="relative min-h-0 flex-1">
+            {/* `inset-0` + `m-auto` con la proporcion y los dos maximos: es el
+                encuadre que se comporta como `object-fit: contain` sin
+                depender de cual de los dos lados sea el que limita. Fijar el
+                alto y confiar en `max-width` no alcanza: cuando el ancho es el
+                que aprieta, el recorte gana y la proporcion se rompe justo en
+                el caso que se queria evitar. */}
+            <div
+              ref={boardBoxRef}
+              className="absolute inset-0 m-auto overflow-hidden rounded-sn-lg border border-sn-line-soft"
+              style={{
+                aspectRatio: String(SKETCH_ASPECT),
+                maxWidth: "100%",
+                maxHeight: "100%",
+                background: BOARD_COLOR,
+              }}
+            >
+              {/* Dos canvas apilados: abajo el cache con los trazos cerrados,
+                  pintados una sola vez; arriba solo el trazo en curso. Es lo que
+                  sostiene 60 fps con 120 trazos. */}
+              <canvas ref={baseCanvasRef} className="absolute inset-0 h-full w-full" aria-label="Dibujo" />
+              <canvas ref={liveCanvasRef} className="absolute inset-0 h-full w-full" aria-hidden="true" />
 
-            {view.phase !== "respuesta" && (
-              <BoardOverlay view={view} scoring={setup.scoring} />
-            )}
+              {view.phase !== "respuesta" && (
+                <BoardOverlay view={view} scoring={setup.scoring} />
+              )}
+            </div>
           </div>
 
           <footer className="shrink-0">

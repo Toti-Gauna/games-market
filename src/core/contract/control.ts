@@ -277,6 +277,23 @@ export type ControlInput =
   /** "Ana esta escribiendo", sin decir que. */
   | { kind: "typing" };
 
+/**
+ * Proporcion del lienzo, compartida por el celular y el proyector.
+ *
+ * Los puntos de un trazo viajan normalizados 0..1 en los dos ejes, asi que
+ * cada lado los multiplica por SU ancho y SU alto. Si los dos rectangulos no
+ * tienen la misma proporcion, el mismo dibujo sale con otra forma: una pelota
+ * hecha redonda en la mano llega al proyector como un huevo acostado.
+ *
+ * Por eso la proporcion es del contrato y no de cada pantalla. Cada lado
+ * encuadra su lienzo con esta proporcion y deja aire alrededor: aire de mas es
+ * gratis, y una figura deformada no se arregla mirandola de lejos.
+ *
+ * 4:3 y no 1:1 porque el que tiene que verse es el proyector, que es apaisado:
+ * un cuadrado le deja la mitad del ancho sin usar.
+ */
+export const SKETCH_ASPECT = 4 / 3;
+
 export type StrokePoint = {
   x: number;
   y: number;

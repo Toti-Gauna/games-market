@@ -10,6 +10,7 @@ import type {
   OptionShape,
   StrokePoint,
 } from "@/core/contract/control";
+import { SKETCH_ASPECT } from "@/core/contract/control";
 import { prefersReducedMotion } from "@/core/engine/palette";
 import { vibrate } from "@/core/engine/audio";
 import { clampToTable, cueBallOf, overlapsBall, projectAim } from "./aim";
@@ -1244,44 +1245,56 @@ function DrawBody({
         </p>
       )}
 
-      <canvas
-        ref={canvasRef}
-        width={1000}
-        height={1000}
-        className="min-h-0 w-full flex-1 touch-none rounded-sn-lg border border-sn-line-soft bg-white"
-        style={{ touchAction: "none" }}
-        aria-label="Lienzo"
-        onPointerDown={(e) => {
-          if (!spec.enabled) return;
-          e.currentTarget.setPointerCapture(e.pointerId);
-          drawingRef.current = true;
-          startedRef.current = false;
-          const point = readPoint(e);
-          lastRef.current = point;
-          pendingRef.current.push(point);
-          paint(point, point);
-        }}
-        onPointerMove={(e) => {
-          if (!drawingRef.current) return;
-          const point = readPoint(e);
-          if (lastRef.current) paint(lastRef.current, point);
-          lastRef.current = point;
-          pendingRef.current.push(point);
-        }}
-        onPointerUp={() => {
-          if (!drawingRef.current) return;
-          drawingRef.current = false;
-          flush("end");
-          startedRef.current = false;
-          lastRef.current = null;
-        }}
-        onPointerCancel={() => {
-          if (!drawingRef.current) return;
-          drawingRef.current = false;
-          flush("end");
-          lastRef.current = null;
-        }}
-      />
+      {/* El lienzo se encuadra con la proporcion del contrato y se centra en
+          el espacio que le toque: es lo que hace que el trazo llegue al
+          proyector con la misma forma que se hizo en la mano. Antes se
+          estiraba a lo que diera el layout y cada pantalla lo deformaba a su
+          manera. El mismo encuadre que usa el proyector. */}
+      <div className="relative min-h-0 flex-1">
+        <canvas
+          ref={canvasRef}
+          width={1000}
+          height={Math.round(1000 / SKETCH_ASPECT)}
+          className="absolute inset-0 m-auto touch-none rounded-sn-lg border border-sn-line-soft bg-white"
+          style={{
+            touchAction: "none",
+            aspectRatio: String(SKETCH_ASPECT),
+            maxWidth: "100%",
+            maxHeight: "100%",
+          }}
+          aria-label="Lienzo"
+          onPointerDown={(e) => {
+            if (!spec.enabled) return;
+            e.currentTarget.setPointerCapture(e.pointerId);
+            drawingRef.current = true;
+            startedRef.current = false;
+            const point = readPoint(e);
+            lastRef.current = point;
+            pendingRef.current.push(point);
+            paint(point, point);
+          }}
+          onPointerMove={(e) => {
+            if (!drawingRef.current) return;
+            const point = readPoint(e);
+            if (lastRef.current) paint(lastRef.current, point);
+            lastRef.current = point;
+            pendingRef.current.push(point);
+          }}
+          onPointerUp={() => {
+            if (!drawingRef.current) return;
+            drawingRef.current = false;
+            flush("end");
+            startedRef.current = false;
+            lastRef.current = null;
+          }}
+          onPointerCancel={() => {
+            if (!drawingRef.current) return;
+            drawingRef.current = false;
+            flush("end");
+            lastRef.current = null;
+          }}
+        />
+      </div>
 
       <div className="flex shrink-0 flex-wrap items-center gap-1.5">
         {spec.colors.map((swatch) => (
