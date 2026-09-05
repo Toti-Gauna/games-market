@@ -253,6 +253,13 @@ export { WEAPON_ASPERSOR, WEAPON_CANON, WEAPON_KINDS, WEAPON_MANGUERA, WEAPON_PI
 /* Tipos                                                               */
 /* ------------------------------------------------------------------ */
 
+/**
+ * Cuantos colores hay para elegir. Tiene que coincidir con `SEAT_TOKENS` de
+ * `view.ts`, que es la paleta: uno cualquiera de esos diez, elegido por la
+ * persona en la pantalla de inicio, en vez de asignado por numero de asiento.
+ */
+export const SKIN_COUNT = 10;
+
 /** Lo que manda un celular, 30 veces por segundo. Intencion, nunca resultado. */
 export type ShooterInput = {
   /** Movimiento, -1..1. `my` positivo es hacia adelante. Manejando: volante y acelerador. */
@@ -264,10 +271,16 @@ export type ShooterInput = {
   jump: boolean;
   /** Subir/bajar del auto o abrir un cofre. Es un flanco, como `jump`. */
   interact: boolean;
+  /**
+   * Color elegido, 0..SKIN_COUNT-1. Viaja con el input y no por un canal
+   * aparte: son cuatro bits sobre un paquete que ya sale 30 veces por
+   * segundo, y asi quien entra tarde tampoco se pierde el color de nadie.
+   */
+  skin: number;
 };
 
 export function createInput(): ShooterInput {
-  return { mx: 0, my: 0, yaw: 0, pitch: 0, fire: false, jump: false, interact: false };
+  return { mx: 0, my: 0, yaw: 0, pitch: 0, fire: false, jump: false, interact: false, skin: 0 };
 }
 
 /**
@@ -325,6 +338,8 @@ export type ShooterWorld = {
   hp: Float32Array;
   /** Que arma carga cada asiento (indice de `weapons`). */
   weapon: Uint8Array;
+  /** El color de cada asiento. Cosmetico: no lo lee ninguna regla. */
+  skin: Uint8Array;
   ammo: Int16Array;
   reload: Float32Array;
   cooldown: Float32Array;
@@ -470,6 +485,7 @@ export function createShooterWorld(map: ShooterMap, rules: ShooterRules): Shoote
     onGround: new Uint8Array(n),
     hp: new Float32Array(n),
     weapon: new Uint8Array(n),
+    skin: new Uint8Array(n),
     ammo: new Int16Array(n),
     reload: new Float32Array(n),
     cooldown: new Float32Array(n),
@@ -572,6 +588,8 @@ export function createShooterWorld(map: ShooterMap, rules: ShooterRules): Shoote
     world.inYaw[seat] = world.yaw[seat] ?? 0;
     world.hp[seat] = HP_MAX;
     world.weapon[seat] = WEAPON_PISTOLA;
+    // Sin eleccion, el color es el del asiento: diez asientos, diez colores.
+    world.skin[seat] = seat % SKIN_COUNT;
     world.ammo[seat] = pistol.magazine;
     world.botWanderX[seat] = spawn.x;
     world.botWanderZ[seat] = spawn.z;
@@ -611,6 +629,13 @@ export function setInput(world: ShooterWorld, seat: number, input: ShooterInput)
   // El salto y la interaccion son flancos: se guardan hasta que un paso los consuma.
   if (input.jump) world.inJump[seat] = 1;
   if (input.interact) world.inInteract[seat] = 1;
+  // El color entra directo: no lo lee ninguna regla, asi que no necesita
+  // esperar al paso. Un indice fuera de rango se ignora en vez de pintar
+  // negro: es la diferencia entre un cliente viejo y un jugador invisible.
+  if (Number.isFinite(input.skin)) {
+    const skin = Math.round(input.skin);
+    if (skin >= 0 && skin < SKIN_COUNT) world.skin[seat] = skin;
+  }
 }
 
 /** El arma actual de un asiento. Siempre devuelve algo valido. */
@@ -1744,6 +1769,9 @@ export function botThink(world: ShooterWorld, seat: number, dt: number, rng: Rng
   }
   out.jump = false;
   out.interact = false;
+  // Un bot no elige color: se queda con el de su asiento. Sin esto, el
+  // scratch de input compartido los pintaria a todos del mismo.
+  out.skin = seat % SKIN_COUNT;
   if ((world.botStuck[seat] ?? 0) > 0.4) {
     out.jump = true;
     world.botStrafe[seat] = -(world.botStrafe[seat] ?? 1);
@@ -1778,7 +1806,12 @@ export const SHOOTER_QUANT: QuantConfig = {
 /** Los autos viajan como entidades con id por encima de los asientos. */
 export const CAR_ENTITY_BASE = 16;
 export const ENTITY_COUNT = MAX_PLAYERS + MAX_CARS;
-export const SCALAR_COUNT = 14;
+/**
+ * Los 16 escalares del contrato, todos usados. Si hiciera falta uno mas, el
+ * lugar donde buscarlo es `S_WEAPONS`: gasta 2 bits por asiento sobre 32, o
+ * sea 12 libres.
+ */
+export const SCALAR_COUNT = 16;
 
 /* Escalares. */
 export const S_STATE = 0; // 0 lobby, 1 deploy, 2 playing, 3 over
@@ -1795,6 +1828,16 @@ export const S_WINNER = 10; // asiento + 1, 0 = nadie
 export const S_ACTIVE = 11; // mascara de asientos activos
 export const S_CHESTS_OPENED = 12; // mascara de cofres abiertos
 export const S_WEAPONS = 13; // 2 bits por asiento: que arma carga
+/**
+ * Los colores elegidos, 4 bits por asiento. Diez colores no entran en tres
+ * bits y cuarenta bits no entran en un escalar, asi que van en dos: los
+ * asientos 0 a 4 en el primero y el 5 al 9 en el segundo.
+ */
+export const S_SKINS_A = 14;
+export const S_SKINS_B = 15;
+/** Cuantos asientos entran en cada uno de los dos escalares de color. */
+const SKINS_PER_SCALAR = 5;
+const SKIN_BITS = 4;
 
 /** Bit 7 del byte de flags de un jugador: disparo en este tick. Los bits 0-6 son la vida. */
 export const FLAG_FIRED = 1 << 7;
@@ -1817,6 +1860,8 @@ export function writeSnapshot(world: ShooterWorld, out: MutableSnapshot, lastKil
   out.tick = world.tick;
   let activeMask = 0;
   let weapons = 0;
+  let skinsA = 0;
+  let skinsB = 0;
   for (let seat = 0; seat < MAX_PLAYERS; seat++) {
     const entity = out.entities[seat];
     if (!entity) continue;
@@ -1830,6 +1875,9 @@ export function writeSnapshot(world: ShooterWorld, out: MutableSnapshot, lastKil
     entity.flags = hp | ((world.fired[seat] ?? 0) === 1 ? FLAG_FIRED : 0);
     if (world.active[seat] === 1) activeMask |= 1 << seat;
     weapons |= ((world.weapon[seat] ?? 0) & 3) << (seat * 2);
+    const skin = (world.skin[seat] ?? 0) & 15;
+    if (seat < SKINS_PER_SCALAR) skinsA |= skin << (seat * SKIN_BITS);
+    else skinsB |= skin << ((seat - SKINS_PER_SCALAR) * SKIN_BITS);
   }
   for (let car = 0; car < MAX_CARS; car++) {
     const entity = out.entities[MAX_PLAYERS + car];
@@ -1864,6 +1912,8 @@ export function writeSnapshot(world: ShooterWorld, out: MutableSnapshot, lastKil
   s[S_ACTIVE] = activeMask;
   s[S_CHESTS_OPENED] = world.chestOpened;
   s[S_WEAPONS] = weapons;
+  s[S_SKINS_A] = skinsA;
+  s[S_SKINS_B] = skinsB;
 }
 
 /** Codifica una muerte para viajar en un escalar. */
@@ -1913,4 +1963,15 @@ export function snapshotWeapon(snapshot: NetSnapshot, seat: number): number {
 
 export function snapshotChestOpened(snapshot: NetSnapshot, chest: number): boolean {
   return ((snapshot.scalars[S_CHESTS_OPENED] ?? 0) & (1 << chest)) !== 0;
+}
+
+/** El color elegido por un asiento, segun los dos escalares empaquetados. */
+export function snapshotSkin(snapshot: NetSnapshot, seat: number): number {
+  const first = seat < SKINS_PER_SCALAR;
+  const packed = snapshot.scalars[first ? S_SKINS_A : S_SKINS_B] ?? 0;
+  const shift = (first ? seat : seat - SKINS_PER_SCALAR) * SKIN_BITS;
+  const skin = (packed >> shift) & 15;
+  // Un valor imposible (cliente viejo, escalar sin escribir) cae al color del
+  // asiento, que es lo que se veia antes de que hubiera colores elegibles.
+  return skin < SKIN_COUNT ? skin : seat % SKIN_COUNT;
 }

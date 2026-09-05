@@ -51,6 +51,17 @@ export type GameStageProps = {
    * `<Canvas>` donde no entra DOM.
    */
   overlay?: ReactNode;
+  /**
+   * La pantalla de arranque deja ver la superficie en vez de taparla.
+   *
+   * El velo con desenfoque del intro existe para que el texto se lea sobre
+   * cualquier juego, y para casi todos esta bien: atras no hay nada que
+   * mirar todavia. Un juego que arranca mostrando algo —un personaje que se
+   * elige, un escenario que presenta— necesita lo contrario: el panel se
+   * corre a un costado, se pone su propio fondo, y el velo desaparece.
+   * Solo aplica al intro; la pausa y el resumen siguen tapando.
+   */
+  introShowcase?: boolean;
   muted: boolean;
   onToggleMuted: () => void;
   onStart: () => void;
@@ -74,6 +85,7 @@ export function GameStage({
   summary,
   introExtra,
   overlay,
+  introShowcase = false,
   muted,
   onToggleMuted,
   onStart,
@@ -169,8 +181,22 @@ export function GameStage({
         )}
 
         {showOverlay && phase !== "countdown" && (
-          <div data-game-ui className="absolute inset-0 grid place-items-center bg-sn-bg/78 backdrop-blur-sm">
-            <div className="w-full max-w-sm px-6 text-center">
+          <div
+            data-game-ui
+            className={
+              introShowcase && phase === "intro"
+                ? // A un costado y sin velo: atras hay algo que mirar.
+                  "absolute inset-0 grid items-end justify-center p-3 sm:items-center sm:justify-end sm:p-6"
+                : "absolute inset-0 grid place-items-center bg-sn-bg/78 backdrop-blur-sm"
+            }
+          >
+            <div
+              className={
+                introShowcase && phase === "intro"
+                  ? "w-full max-w-sm rounded-xl border border-sn-line bg-sn-panel/92 px-6 py-5 text-center shadow-lg backdrop-blur-sm"
+                  : "w-full max-w-sm px-6 text-center"
+              }
+            >
               {phase === "intro" && (
                 <>
                   <p className="mb-5 text-sm text-sn-muted">{instructions}</p>

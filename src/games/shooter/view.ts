@@ -38,6 +38,7 @@ import {
   ringDistance,
   setInput,
   simulateBody,
+  snapshotSkin,
   snapshotWeapon,
   stepWorld,
   weaponSpec,
@@ -78,7 +79,13 @@ import {
  * el feed cuando alguien muere, y una especificacion de arma al cambiarla.
  */
 
-/** Un color por asiento, todos de la paleta. Se ve quien es quien de lejos. */
+/**
+ * La paleta de colores de personaje: diez, todos de la marca.
+ *
+ * Cada uno elige el suyo en la pantalla de inicio; quien no elige se queda
+ * con el de su asiento, que es como se veia antes de que hubiera eleccion.
+ * El indice es lo que viaja por red (`skin`), nunca el color.
+ */
 export const SEAT_TOKENS: readonly PaletteToken[] = [
   "--sn-cyan-400",
   "--sn-magenta-400",
@@ -163,9 +170,16 @@ export type ShooterView = {
   readonly yaw: Float32Array;
   readonly pitch: Float32Array;
   readonly weapon: Uint8Array;
+  /** El color de cada asiento: indice en `SEAT_TOKENS`. */
+  readonly skin: Uint8Array;
   /** Auto que maneja cada asiento, o -1. */
   readonly driving: Int8Array;
   readonly names: string[];
+  /** Lo que eligio esta persona en la pantalla de inicio. */
+  ownSkin: number;
+  ownName: string;
+  /** El nombre del proyector, para cuando toma el asiento 0. */
+  hostName: string;
 
   /* Los autos. */
   readonly carCount: number;
@@ -303,6 +317,10 @@ export function createView(options: {
   const names: string[] = [];
   for (let i = 0; i < n; i++) names.push(`Jugador ${i + 1}`);
 
+  // Sin eleccion, el color es el del asiento: diez asientos, diez colores.
+  const skins = new Uint8Array(n);
+  for (let i = 0; i < n; i++) skins[i] = i % n;
+
   const inputs: ShooterInput[] = [];
   for (let i = 0; i < INPUT_BUFFERS; i++) inputs.push(createInput());
 
@@ -328,8 +346,12 @@ export function createView(options: {
     yaw: new Float32Array(n),
     pitch: new Float32Array(n),
     weapon: new Uint8Array(n),
+    skin: skins,
     driving: new Int8Array(n).fill(-1),
     names,
+    ownSkin: seat % n,
+    ownName: names[seat] ?? "Jugador",
+    hostName: "Proyector",
 
     carCount: Math.min(MAX_CARS, map.cars.length),
     carX: new Float32Array(MAX_CARS),
@@ -486,7 +508,7 @@ export function hostSetHuman(view: ShooterView, seat: number, human: boolean, na
   // El asiento 0 es el proyector: lo juega un bot salvo que la persona de la
   // PC tome el control (`setHostPlaying`), nunca un celular.
   if (seat === 0) {
-    view.names[0] = view.hostPlaying ? "Proyector" : "Bot 1";
+    view.names[0] = view.hostPlaying ? view.ownName : "Bot 1";
     return;
   }
   if (view.world) markHuman(view.world, seat, human);
@@ -508,8 +530,9 @@ export function setHostPlaying(view: ShooterView, playing: boolean): void {
   if (!world || view.hostPlaying === playing) return;
   view.hostPlaying = playing;
   markHuman(world, 0, playing);
-  view.names[0] = playing ? "Proyector" : "Bot 1";
+  view.names[0] = playing ? view.ownName : "Bot 1";
   if (playing) {
+    world.skin[0] = view.ownSkin;
     view.camYaw = world.yaw[0] ?? 0;
     view.camPitch = 0;
     view.spectating = world.active[0] === 1 && world.alive[0] !== 1 && view.state >= 2;
@@ -535,6 +558,7 @@ function hostLocalInput(view: ShooterView, world: ShooterWorld, sticks: StickSam
   input.fire = sticks.fire;
   input.jump = sticks.jump;
   input.interact = view.interactQueued;
+  input.skin = view.ownSkin;
   view.interactQueued = false;
   setInput(world, 0, input);
 }
@@ -684,6 +708,7 @@ function copyWorldToArrays(view: ShooterView): void {
     view.yaw[seat] = world.yaw[seat] ?? 0;
     view.pitch[seat] = world.pitch[seat] ?? 0;
     view.weapon[seat] = world.weapon[seat] ?? 0;
+    view.skin[seat] = world.skin[seat] ?? seat;
     view.driving[seat] = world.driving[seat] ?? -1;
   }
   for (let car = 0; car < MAX_CARS; car++) {
@@ -765,7 +790,10 @@ export function clientStep(view: ShooterView, dt: number, sticks: StickSample): 
     input.fire = sticks.fire;
     input.jump = sticks.jump;
     input.interact = view.interactQueued;
+    input.skin = view.ownSkin;
     view.interactQueued = false;
+    // El color propio se ve en el acto, sin esperar a que vuelva por red.
+    view.skin[view.seat] = view.ownSkin;
 
     const sequence = prediction.predict(input);
     view.send?.(input, sequence);
@@ -882,7 +910,9 @@ export function clientOnState(view: ShooterView, state: NetSnapshot, ackedSequen
   view.deployLeft = s[S_DEPLOY] ?? 0;
   view.winner = (s[S_WINNER] ?? 0) - 1;
   const activeMask = s[S_ACTIVE] ?? 0;
-  view.names[0] = (activeMask & HOST_PLAYING_BIT) !== 0 ? "Proyector" : "Bot 1";
+  // El asiento 0 lo juega el proyector o su bot; el nombre del proyector sale
+  // del roster (`hostName`), que es lo que eligio la persona de esa PC.
+  view.names[0] = (activeMask & HOST_PLAYING_BIT) !== 0 ? view.hostName : "Bot 1";
 
   if (view.state === 3 && view.overAt < 0) view.overAt = view.elapsed;
   // Partida nueva desde el host (reinicio): el celular vuelve a su aparicion.
@@ -1066,10 +1096,13 @@ export function applySampled(view: ShooterView, sampled: NetSnapshot | null): vo
     const hp = entityHp(entity);
     view.weapon[seat] = snapshotWeapon(sampled, seat);
     if (seat === view.seat) {
-      // El propio se dibuja predicho, no interpolado: solo la vida viene de aca.
+      // El propio se dibuja predicho, no interpolado: solo la vida viene de
+      // aca, y el color sale de lo elegido, que ya se ve sin esperar la red.
       view.active[seat] = 1;
+      view.skin[seat] = view.ownSkin;
       continue;
     }
+    view.skin[seat] = snapshotSkin(sampled, seat);
     view.active[seat] = active ? 1 : 0;
     view.hp[seat] = hp;
     view.alive[seat] = active && hp > 0 ? 1 : 0;

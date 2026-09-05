@@ -61,6 +61,50 @@ import {
 
 const EMPTY_ACKS: Readonly<Record<string, number>> = Object.freeze({});
 
+/* Nombre y color elegidos, recordados entre partidas. */
+const NAME_KEY = "sn-shooter-name";
+const SKIN_KEY = "sn-shooter-skin";
+const NAME_MAX = 16;
+
+/**
+ * `localStorage` tira en modo privado y en algunos navegadores embebidos, y
+ * un nombre guardado no vale una pantalla en blanco.
+ */
+function readStored(key: string): string | null {
+  try {
+    return window.localStorage.getItem(key);
+  } catch {
+    return null;
+  }
+}
+
+function writeStored(key: string, value: string): void {
+  try {
+    window.localStorage.setItem(key, value);
+  } catch {
+    // Sin persistencia se juega igual: la eleccion vale para esta partida.
+  }
+}
+
+/** Sin espacios de mas ni nombres kilometricos que rompan el feed. */
+function cleanName(raw: string): string {
+  return raw.replace(/\s+/g, " ").trim().slice(0, NAME_MAX);
+}
+
+function defaultName(seat: number, isHost: boolean): string {
+  return isHost ? "Proyector" : `Jugador ${seat + 1}`;
+}
+
+function loadName(seat: number, isHost: boolean): string {
+  return cleanName(readStored(NAME_KEY) ?? "") || defaultName(seat, isHost);
+}
+
+function loadSkin(seat: number): number {
+  const raw = Number(readStored(SKIN_KEY));
+  if (Number.isInteger(raw) && raw >= 0 && raw < SEAT_TOKENS.length) return raw;
+  return seat % SEAT_TOKENS.length;
+}
+
 /** El HUD se muestrea a 10 Hz: es lo que un ojo distingue en una barra. */
 const HUD_SAMPLE_MS = 100;
 
@@ -253,6 +297,36 @@ export default function ShooterGame({ config, signal, onFinish, onReady }: GameP
   viewRef.current = view;
   view.reducedMotion = life.reducedMotion;
 
+  /*
+   * Nombre y color: se eligen en la pantalla de inicio y se recuerdan entre
+   * partidas. El nombre tiene DOS estados a proposito: `nameDraft` es lo que
+   * se esta tecleando y `name` es lo que sabe la red. `useGameNet` rehace la
+   * sesion entera cuando cambia el nombre —esta en las dependencias del
+   * efecto que crea el puerto—, asi que escribir letra por letra sobre el
+   * nombre de red seria reconectar en cada tecla. Se confirma al salir del
+   * campo o al empezar a jugar.
+   */
+  const [nameDraft, setNameDraft] = useState(() => loadName(seat, isHost));
+  const [name, setName] = useState(nameDraft);
+  const [skin, setSkin] = useState(() => loadSkin(seat));
+
+  const commitName = useCallback(() => {
+    const clean = cleanName(nameDraft) || defaultName(seat, isHost);
+    setNameDraft(clean);
+    setName(clean);
+    writeStored(NAME_KEY, clean);
+  }, [nameDraft, seat, isHost]);
+
+  const chooseSkin = useCallback((next: number) => {
+    setSkin(next);
+    writeStored(SKIN_KEY, String(next));
+  }, []);
+
+  // La vista es la que lleva lo elegido al input y a la escena, sin React en
+  // el medio: se escribe en cada render, como `reducedMotion`.
+  view.ownSkin = skin;
+  view.ownName = name;
+
   const sticks = useMemo<SticksState>(() => createSticksState(), []);
 
   const viewScratch = useMemo(() => createMutableSnapshot(), []);
@@ -265,7 +339,7 @@ export default function ShooterGame({ config, signal, onFinish, onReady }: GameP
     role: isHost ? "host" : "client",
     seat,
     seats: MAX_PLAYERS,
-    name: isHost ? "Proyector" : `Jugador ${seat + 1}`,
+    name,
     codec: wireCodec,
     interpolate: { lerp: viewLerp, delayMs: VIEW_DELAY_MS },
 
@@ -299,8 +373,13 @@ export default function ShooterGame({ config, signal, onFinish, onReady }: GameP
   // Los nombres del roster, en los dos roles: el feed dice quien mato a quien.
   useEffect(() => {
     for (const player of netHandle.players) {
-      // El asiento 0 se nombra segun quien lo juegue (bot o la PC), no por el roster.
-      if (player.seat === 0) continue;
+      // El asiento 0 se nombra segun quien lo juegue (bot o la PC), no por el
+      // roster; pero de ahi sale como se llama la persona del proyector, que
+      // es lo que ven los celulares cuando toma el asiento con Tab.
+      if (player.seat === 0) {
+        if (!player.bot) view.hostName = player.name;
+        continue;
+      }
       view.names[player.seat] = player.bot ? `Bot ${player.seat + 1}` : player.name;
     }
   }, [netHandle.players, view]);
@@ -355,6 +434,13 @@ export default function ShooterGame({ config, signal, onFinish, onReady }: GameP
     const id = window.setInterval(() => setHud(readHud(view, connectedRef.current)), HUD_SAMPLE_MS);
     return () => window.clearInterval(id);
   }, [playing, view]);
+
+  // Empezar confirma el nombre: es la ultima oportunidad de que la red se
+  // entere antes de que la pantalla de inicio desaparezca.
+  const startMatch = useCallback(() => {
+    commitName();
+    life.start();
+  }, [commitName, life]);
 
   const portrait = usePortrait();
 
@@ -424,11 +510,13 @@ export default function ShooterGame({ config, signal, onFinish, onReady }: GameP
       instructions={instructions}
       muted={life.muted}
       onToggleMuted={life.toggleMuted}
-      onStart={life.start}
+      onStart={startMatch}
       onResume={life.resume}
       onPause={life.pause}
       onRestart={life.restart}
       aspect={16 / 9}
+      // El intro muestra el personaje sobre el pedestal: el panel se corre.
+      introShowcase
       camera={{ position: [0, 60, 90], fov: 58, near: 0.1, far: 460 }}
       lights={false}
       background="var(--sn-bg)"
@@ -446,13 +534,65 @@ export default function ShooterGame({ config, signal, onFinish, onReady }: GameP
         </>
       }
       introExtra={
-        <p className="text-xs text-sn-muted">
-          {netHandle.transportError
-            ? `Red: ${netHandle.transportError}`
-            : isHost
-              ? `${connected} ${connected === 1 ? "celular conectado" : "celulares conectados"} · los lugares vacíos los juegan bots`
-              : `Puesto ${seat + 1} · ${netHandle.status === "live" ? "conectado al proyector" : "conectando…"}`}
-        </p>
+        <div className="flex flex-col gap-3 text-left">
+          <label className="flex flex-col gap-1">
+            <span className="text-[10px] uppercase tracking-[0.18em] text-sn-dim">Tu nombre</span>
+            <input
+              type="text"
+              value={nameDraft}
+              maxLength={NAME_MAX}
+              onChange={(event) => setNameDraft(event.target.value)}
+              onBlur={commitName}
+              onKeyDown={(event) => {
+                if (event.key === "Enter") {
+                  event.preventDefault();
+                  commitName();
+                }
+              }}
+              className="h-9 rounded-md px-2 text-sm"
+              style={{
+                background: "var(--sn-bg-elev)",
+                color: "var(--sn-text)",
+                border: "1px solid var(--sn-line)",
+              }}
+              placeholder={defaultName(seat, isHost)}
+              data-game-ui
+            />
+          </label>
+
+          <div className="flex flex-col gap-1">
+            <span className="text-[10px] uppercase tracking-[0.18em] text-sn-dim">Tu color</span>
+            <div className="flex flex-wrap gap-1.5">
+              {SEAT_TOKENS.map((token, index) => (
+                <button
+                  key={token}
+                  type="button"
+                  onClick={() => chooseSkin(index)}
+                  aria-label={`Color ${index + 1}`}
+                  aria-pressed={skin === index}
+                  className="h-7 w-7 rounded-full transition-transform"
+                  style={{
+                    background: `var(${token})`,
+                    // El elegido se nota por el aro y el tamano, no solo por
+                    // el color: dos de la paleta son parecidos entre si.
+                    outline: skin === index ? "2px solid var(--sn-text)" : "none",
+                    outlineOffset: "2px",
+                    transform: skin === index ? "scale(1.12)" : "none",
+                  }}
+                  data-game-ui
+                />
+              ))}
+            </div>
+          </div>
+
+          <p className="text-xs text-sn-muted">
+            {netHandle.transportError
+              ? `Red: ${netHandle.transportError}`
+              : isHost
+                ? `${connected} ${connected === 1 ? "celular conectado" : "celulares conectados"} · los lugares vacíos los juegan bots`
+                : `Puesto ${seat + 1} · ${netHandle.status === "live" ? "conectado al proyector" : "conectando…"}`}
+          </p>
+        </div>
       }
       overlay={
         <ShooterOverlay
@@ -468,7 +608,13 @@ export default function ShooterGame({ config, signal, onFinish, onReady }: GameP
       }
       summary={<Summary hud={hud} isHost={isHost} seat={seat} />}
     >
-      <ShooterScene view={view} enabled={playing} tick={tick} sampleState={netHandle.sampleState} />
+      <ShooterScene
+        view={view}
+        enabled={playing}
+        tick={tick}
+        sampleState={netHandle.sampleState}
+        lobby={phase === "intro"}
+      />
     </Stage>
   );
 }

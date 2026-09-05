@@ -71,6 +71,8 @@ const SKY_RADIUS = 300;
 const FOV_FPV = 78;
 const FOV_DRIVE = 68;
 const FOV_SPECTATOR = 58;
+/** Mas cerrado que el resto: es un retrato, no un paisaje. */
+const FOV_LOBBY = 42;
 /** Cuantas celdas por lado tiene la malla del terreno. */
 const TERRAIN_SEGMENTS = 120;
 
@@ -82,6 +84,11 @@ export type ShooterSceneProps = {
   tick: (dt: number) => void;
   /** El estado interpolado de `useGameNet`. En el host devuelve null. */
   sampleState: () => NetSnapshot | null;
+  /**
+   * La pantalla de inicio: el personaje sobre un pedestal, con el valle
+   * detras. Se prende antes de empezar, que es cuando se elige nombre y color.
+   */
+  lobby: boolean;
 };
 
 export function ShooterScene(props: ShooterSceneProps) {
@@ -234,6 +241,15 @@ function Arena({ map }: { map: ShooterMap }) {
 
 const Z_AXIS = new Vector3(0, 0, 1);
 
+/**
+ * El color de un asiento: el que esa persona eligio, o el de su numero
+ * mientras no haya llegado ningun estado que lo diga.
+ */
+function skinOf(view: ShooterView, seat: number): number {
+  const skin = view.skin[seat] ?? seat;
+  return skin < SEAT_TOKENS.length ? skin : seat % SEAT_TOKENS.length;
+}
+
 type Writers = Record<
   | "bodies"
   | "heads"
@@ -253,7 +269,7 @@ type Writers = Record<
   InstanceWriter
 >;
 
-function Runtime({ view, enabled, tick, sampleState }: ShooterSceneProps) {
+function Runtime({ view, enabled, tick, sampleState, lobby }: ShooterSceneProps) {
   const camera = useThree((state) => state.camera) as PerspectiveCamera;
 
   const tickRef = useRef(tick);
@@ -339,7 +355,7 @@ function Runtime({ view, enabled, tick, sampleState }: ShooterSceneProps) {
   );
 
   /** Colores por asiento en lineal, listos para `tint`. */
-  const seatRgb = useMemo(() => {
+  const skinRgb = useMemo(() => {
     const out = new Float32Array(MAX_PLAYERS * 3);
     SEAT_TOKENS.forEach((token, index) => {
       const color = getColor(token);
@@ -366,6 +382,17 @@ function Runtime({ view, enabled, tick, sampleState }: ShooterSceneProps) {
 
   const skyRef = useRef<Mesh>(null);
   const ringRef = useRef<Mesh>(null);
+  const avatarRef = useRef<Mesh>(null);
+
+  /**
+   * Donde se para el personaje en la pantalla de inicio: su propio punto de
+   * aparicion, sobre el terreno. Es un lugar del mapa y no un limbo negro,
+   * asi que detras se ve el valle y el atardecer de esta partida.
+   */
+  const pedestal = useMemo(() => {
+    const spawn = view.map.spawns[view.seat] ?? { x: 0, z: 40 };
+    return { x: spawn.x, y: terrainHeight(view.map, spawn.x, spawn.z), z: spawn.z };
+  }, [view.map, view.seat]);
   const viewmodelRef = useRef<Group>(null);
   const gunRef = useRef<Group>(null);
   const muzzleRef = useRef<Mesh>(null);
@@ -395,9 +422,19 @@ function Runtime({ view, enabled, tick, sampleState }: ShooterSceneProps) {
     tickShaders(view.elapsed);
 
     const local = !view.isHost || view.hostPlaying;
-    const driving = local && view.ownDriving >= 0 && !view.spectating && view.state !== 3;
-    const fpv = local && !driving && !view.spectating && view.state !== 3;
-    driveCamera(view, camera, scratch, fpv, driving, dt);
+    const driving = !lobby && local && view.ownDriving >= 0 && !view.spectating && view.state !== 3;
+    const fpv = !lobby && local && !driving && !view.spectating && view.state !== 3;
+    driveCamera(view, camera, scratch, fpv, driving, lobby, pedestal, dt);
+
+    // El personaje del pedestal: gira despacio y lleva el color elegido.
+    const avatar = avatarRef.current;
+    if (avatar) {
+      avatar.rotation.y = view.reducedMotion ? 0.6 : view.elapsed * 0.5;
+      // Lo elegido en el acto, sin pasar por la red: la partida no empezo.
+      // `getMaterial` cachea por token, asi que asignar el mismo no cuesta.
+      const chosen = SEAT_TOKENS[view.ownSkin % SEAT_TOKENS.length] ?? "--sn-text";
+      avatar.material = getMaterial(chosen, { kind: "lambert" });
+    }
 
     const sky = skyRef.current;
     if (sky) sky.position.copy(camera.position);
@@ -409,10 +446,10 @@ function Runtime({ view, enabled, tick, sampleState }: ShooterSceneProps) {
       ring.scale.set(view.ringRadius, RING_HEIGHT, view.ringRadius);
     }
 
-    writePlayers(view, writers, seatRgb, palette, fpv, scratch.dir);
-    writeCars(view, writers, seatRgb, palette);
+    writePlayers(view, writers, skinRgb, palette, fpv, scratch.dir);
+    writeCars(view, writers, skinRgb, palette);
     writeChests(view, writers, palette);
-    writeEffects(view, writers, seatRgb, palette, scratch);
+    writeEffects(view, writers, skinRgb, palette, scratch);
     driveViewmodel(view, viewmodelRef.current, gunRef.current, muzzleRef.current, camera, fpv);
   });
 
@@ -429,6 +466,32 @@ function Runtime({ view, enabled, tick, sampleState }: ShooterSceneProps) {
       {Object.values(writers).map((writer, index) => (
         <primitive key={index} object={writer.mesh} />
       ))}
+
+      {/*
+        El personaje de la pantalla de inicio. Se monta y se desmonta con la
+        fase, asi que ni la malla ni su luz existen mientras se juega.
+      */}
+      {lobby && (
+        <group position={[pedestal.x, pedestal.y, pedestal.z]}>
+          <mesh
+            ref={avatarRef}
+            position={[0, 1.5, 0]}
+            geometry={getGeometry("avatar")}
+            material={getMaterial("--sn-text", { kind: "lambert" })}
+            scale={1.8}
+            dispose={null}
+          />
+          <mesh
+            position={[0, 0.3, 0]}
+            geometry={getGeometry("cylinder")}
+            material={getMaterial("--sn-rock-600", { kind: "lambert" })}
+            scale={[1.9, 0.6, 1.9]}
+            dispose={null}
+          />
+          {/* Una luz propia: el sol esta bajo y el personaje quedaria plano. */}
+          <pointLight position={[1.6, 3.2, 2.4]} intensity={18} distance={14} decay={2} />
+        </group>
+      )}
 
       {/*
         El arma en primera persona. Cuelga de un grupo que se pega a la camara
@@ -507,14 +570,44 @@ function driveCamera(
   scratch: CameraScratch,
   fpv: boolean,
   driving: boolean,
+  lobby: boolean,
+  pedestal: { x: number; y: number; z: number },
   dt: number,
 ): void {
-  const mode = fpv ? "fpv" : driving ? "drive" : "spectator";
+  const mode = lobby ? "lobby" : fpv ? "fpv" : driving ? "drive" : "spectator";
   if (mode !== scratch.mode) {
     scratch.mode = mode;
     scratch.settled = false;
-    camera.fov = fpv ? FOV_FPV : driving ? FOV_DRIVE : FOV_SPECTATOR;
+    camera.fov = lobby ? FOV_LOBBY : fpv ? FOV_FPV : driving ? FOV_DRIVE : FOV_SPECTATOR;
     camera.updateProjectionMatrix();
+  }
+
+  if (lobby) {
+    /*
+     * Retrato con el valle detras. Dos cosas que no son obvias:
+     *
+     * - La camara mira desde donde viene el sol, para que el personaje se vea
+     *   iluminado y no en contraluz.
+     * - No apunta al personaje sino a un punto A SU DERECHA, lo que lo corre
+     *   hacia la izquierda del encuadre. El panel del intro ocupa la derecha
+     *   (ver `introShowcase` en GameStage): apuntando al centro, el personaje
+     *   quedaria justo detras del panel.
+     */
+    const ox = 3.4;
+    const oz = 4.6;
+    camera.position.set(pedestal.x + ox, pedestal.y + 2.4, pedestal.z + oz);
+    // Derecha de la camara = (-fz, fx) con el frente horizontal normalizado.
+    const length = Math.hypot(ox, oz);
+    const rightX = oz / length;
+    const rightZ = -ox / length;
+    const shift = 1.8;
+    scratch.lookAt.set(
+      pedestal.x + rightX * shift,
+      pedestal.y + 1.35,
+      pedestal.z + rightZ * shift,
+    );
+    camera.lookAt(scratch.lookAt);
+    return;
   }
 
   if (fpv) {
@@ -619,7 +712,7 @@ const SQRT_HALF = Math.SQRT1_2;
 function writePlayers(
   view: ShooterView,
   writers: Writers,
-  seatRgb: Float32Array,
+  skinRgb: Float32Array,
   palette: Palette,
   fpv: boolean,
   dir: Float32Array,
@@ -644,9 +737,10 @@ function writePlayers(
     const z = view.z[seat] ?? 0;
     const yaw = view.yaw[seat] ?? 0;
     const pitch = view.pitch[seat] ?? 0;
-    const r = seatRgb[seat * 3] ?? 1;
-    const g = seatRgb[seat * 3 + 1] ?? 1;
-    const b = seatRgb[seat * 3 + 2] ?? 1;
+    const skin = skinOf(view, seat);
+    const r = skinRgb[skin * 3] ?? 1;
+    const g = skinRgb[skin * 3 + 1] ?? 1;
+    const b = skinRgb[skin * 3 + 2] ?? 1;
 
     const fx = -Math.sin(yaw);
     const fz = -Math.cos(yaw);
@@ -723,7 +817,7 @@ function writePlayers(
  * Los autos: carroceria, cabina y cuatro ruedas, tres draw calls para todos.
  * La cabina lleva el color de quien maneja: desde lejos se sabe quien va.
  */
-function writeCars(view: ShooterView, writers: Writers, seatRgb: Float32Array, palette: Palette): void {
+function writeCars(view: ShooterView, writers: Writers, skinRgb: Float32Array, palette: Palette): void {
   const { carBodies, carCabins, wheels } = writers;
   carBodies.begin();
   carCabins.begin();
@@ -743,7 +837,8 @@ function writeCars(view: ShooterView, writers: Writers, seatRgb: Float32Array, p
     carBodies.tint(palette.carPaint.r, palette.carPaint.g, palette.carPaint.b);
     carCabins.pushYaw(x - fx * 0.3, y + 1.22, z - fz * 0.3, yaw, 1.7, 0.62, 2);
     if (driver >= 0) {
-      carCabins.tint(seatRgb[driver * 3] ?? 1, seatRgb[driver * 3 + 1] ?? 1, seatRgb[driver * 3 + 2] ?? 1);
+      const skin = skinOf(view, driver);
+      carCabins.tint(skinRgb[skin * 3] ?? 1, skinRgb[skin * 3 + 1] ?? 1, skinRgb[skin * 3 + 2] ?? 1);
     } else {
       carCabins.tint(palette.carFree.r, palette.carFree.g, palette.carFree.b);
     }
@@ -828,7 +923,7 @@ function writeChests(view: ShooterView, writers: Writers, palette: Palette): voi
 function writeEffects(
   view: ShooterView,
   writers: Writers,
-  seatRgb: Float32Array,
+  skinRgb: Float32Array,
   palette: Palette,
   scratch: CameraScratch,
 ): void {
@@ -864,10 +959,11 @@ function writeEffects(
     );
     // Agua del color de quien tira, apenas: se sabe de donde vino el chorro.
     const seat = Math.max(0, Math.min(MAX_PLAYERS - 1, Math.round(t[base + 7] ?? 0)));
+    const skin = skinOf(view, seat);
     tracers.tint(
-      (palette.water.r + (seatRgb[seat * 3] ?? 1)) * 0.5,
-      (palette.water.g + (seatRgb[seat * 3 + 1] ?? 1)) * 0.5,
-      (palette.water.b + (seatRgb[seat * 3 + 2] ?? 1)) * 0.5,
+      (palette.water.r + (skinRgb[skin * 3] ?? 1)) * 0.5,
+      (palette.water.g + (skinRgb[skin * 3 + 1] ?? 1)) * 0.5,
+      (palette.water.b + (skinRgb[skin * 3 + 2] ?? 1)) * 0.5,
     );
   }
   tracers.end();

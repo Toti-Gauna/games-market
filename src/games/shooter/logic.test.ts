@@ -29,6 +29,9 @@ import {
   PLAYER_RADIUS,
   RING_SCHEDULE,
   RING_START_RADIUS,
+  SKIN_COUNT,
+  S_SKINS_A,
+  S_SKINS_B,
   activateSeat,
   botThink,
   createInput,
@@ -51,6 +54,7 @@ import {
   shooterPoints,
   simulateBody,
   snapshotChestOpened,
+  snapshotSkin,
   snapshotWeapon,
   stepVehicle,
   stepWorld,
@@ -62,6 +66,7 @@ import {
   type ShooterInput,
   type ShooterWorld,
 } from "./logic";
+import { SEAT_TOKENS } from "./view";
 
 const STEP = 1 / 60;
 
@@ -293,9 +298,12 @@ describe("movimiento", () => {
       fire: false,
       jump: false,
       interact: false,
+      skin: 99,
     });
     expect(world.inMx[0]).toBe(0);
     expect(world.inMy[0]).toBe(1);
+    // Un color fuera de la paleta se ignora: se queda con el del asiento.
+    expect(world.skin[0]).toBe(0);
     // Float32: 1.45 guardado vuelve como 1.4500000476.
     expect(world.inPitch[0]).toBeLessThanOrEqual(1.45 + 1e-6);
     expect(Number.isFinite(world.inYaw[0] ?? 0)).toBe(true);
@@ -889,5 +897,53 @@ describe("snapshot", () => {
 
   it("el ojo esta donde dice la constante", () => {
     expect(EYE_HEIGHT).toBeLessThan(PLAYER_HEIGHT);
+  });
+});
+
+describe("colores elegidos", () => {
+  it("cada asiento manda el suyo y viaja completo por los dos escalares", () => {
+    const world = freshWorld("skins", MAX_PLAYERS);
+    skipDeploy(world);
+    // Los diez colores, uno por asiento, al reves: asi ningun asiento
+    // coincide con su valor por defecto y un error de indice se nota.
+    for (let seat = 0; seat < MAX_PLAYERS; seat++) {
+      setInput(world, seat, humanInput({ skin: MAX_PLAYERS - 1 - seat }));
+    }
+    const snapshot = createMutableSnapshot();
+    writeSnapshot(world, snapshot, 0);
+    for (let seat = 0; seat < MAX_PLAYERS; seat++) {
+      expect(world.skin[seat]).toBe(MAX_PLAYERS - 1 - seat);
+      expect(snapshotSkin(snapshot, seat)).toBe(MAX_PLAYERS - 1 - seat);
+    }
+    // Los dos escalares entran holgados en un entero de 32 bits con signo.
+    expect(snapshot.scalars[S_SKINS_A]).toBeGreaterThan(0);
+    expect(snapshot.scalars[S_SKINS_A]).toBeLessThan(2 ** 31);
+    expect(snapshot.scalars[S_SKINS_B]).toBeGreaterThan(0);
+    expect(snapshot.scalars[S_SKINS_B]).toBeLessThan(2 ** 31);
+  });
+
+  it("sin eleccion, el color es el del asiento", () => {
+    const world = freshWorld("default", MAX_PLAYERS);
+    const snapshot = createMutableSnapshot();
+    writeSnapshot(world, snapshot, 0);
+    for (let seat = 0; seat < MAX_PLAYERS; seat++) {
+      expect(snapshotSkin(snapshot, seat)).toBe(seat);
+    }
+  });
+
+  it("un bot se queda con el color de su asiento", () => {
+    // Con el scratch de input compartido, un bot que no escribe `skin`
+    // pintaria a todos del color del ultimo que hablo.
+    const world = freshWorld("botskin", 1, MAX_PLAYERS);
+    skipDeploy(world);
+    setInput(world, 0, humanInput({ skin: 7 }));
+    const rng = createRng("botskin");
+    for (let i = 0; i < 30; i++) stepWorld(world, STEP, rng);
+    expect(world.skin[0]).toBe(7);
+    for (let seat = 1; seat < MAX_PLAYERS; seat++) expect(world.skin[seat]).toBe(seat);
+  });
+
+  it("la paleta de la vista tiene tantos colores como dice la simulacion", () => {
+    expect(SEAT_TOKENS).toHaveLength(SKIN_COUNT);
   });
 });

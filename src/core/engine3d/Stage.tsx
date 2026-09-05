@@ -85,6 +85,8 @@ export type StageProps = {
   introExtra?: ReactNode;
   /** Capa de DOM entre el canvas y el HUD: sticks, mira, indicadores. */
   overlay?: ReactNode;
+  /** El intro deja ver la escena: el panel se corre y no hay velo. */
+  introShowcase?: boolean;
   muted: boolean;
   onToggleMuted: () => void;
   onStart: () => void;
@@ -129,6 +131,7 @@ export function Stage({
   summary,
   introExtra,
   overlay,
+  introShowcase = false,
   muted,
   onToggleMuted,
   onStart,
@@ -241,6 +244,7 @@ export function Stage({
       {...(summary !== undefined ? { summary } : {})}
       {...(introExtra !== undefined ? { introExtra } : {})}
       {...(overlay !== undefined ? { overlay } : {})}
+      introShowcase={introShowcase}
       muted={muted}
       onToggleMuted={onToggleMuted}
       onStart={onStart}
