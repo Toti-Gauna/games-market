@@ -298,6 +298,7 @@ describe("movimiento", () => {
       fire: false,
       jump: false,
       interact: false,
+      reload: false,
       skin: 99,
     });
     expect(world.inMx[0]).toBe(0);
@@ -929,6 +930,27 @@ describe("colores elegidos", () => {
     for (let seat = 0; seat < MAX_PLAYERS; seat++) {
       expect(snapshotSkin(snapshot, seat)).toBe(seat);
     }
+  });
+
+  it("recargar a mano solo cuando falta agua", () => {
+    const world = freshWorld("recarga", 2, 2, flatMap("recarga"));
+    skipDeploy(world);
+    const rng = createRng("recarga");
+    place(world, 0, 0, 30, Math.PI);
+    place(world, 1, -60, 60, 0);
+    // Con el cargador lleno no pasa nada: el flanco se consume igual, para
+    // que no salte solo tres segundos despues.
+    setInput(world, 0, humanInput({ reload: true, yaw: Math.PI }));
+    stepWorld(world, STEP, rng);
+    expect(world.reload[0]).toBe(0);
+    expect(world.inReload[0]).toBe(0);
+    // Con el cargador a medias, recarga y deja el cargador lleno.
+    world.ammo[0] = 5;
+    setInput(world, 0, humanInput({ reload: true, yaw: Math.PI }));
+    stepWorld(world, STEP, rng);
+    expect(world.reload[0]).toBeGreaterThan(0);
+    for (let i = 0; i < Math.ceil(DEFAULT_RULES.reloadS * 60) + 2; i++) stepWorld(world, STEP, rng);
+    expect(world.ammo[0]).toBe(DEFAULT_RULES.magazine);
   });
 
   it("un bot se queda con el color de su asiento", () => {

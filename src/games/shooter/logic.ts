@@ -271,6 +271,8 @@ export type ShooterInput = {
   jump: boolean;
   /** Subir/bajar del auto o abrir un cofre. Es un flanco, como `jump`. */
   interact: boolean;
+  /** Recargar a mano, sin esperar a quedarse sin agua. Tambien un flanco. */
+  reload: boolean;
   /**
    * Color elegido, 0..SKIN_COUNT-1. Viaja con el input y no por un canal
    * aparte: son cuatro bits sobre un paquete que ya sale 30 veces por
@@ -280,7 +282,7 @@ export type ShooterInput = {
 };
 
 export function createInput(): ShooterInput {
-  return { mx: 0, my: 0, yaw: 0, pitch: 0, fire: false, jump: false, interact: false, skin: 0 };
+  return { mx: 0, my: 0, yaw: 0, pitch: 0, fire: false, jump: false, interact: false, reload: false, skin: 0 };
 }
 
 /**
@@ -369,6 +371,7 @@ export type ShooterWorld = {
   inFire: Uint8Array;
   inJump: Uint8Array;
   inInteract: Uint8Array;
+  inReload: Uint8Array;
 
   /* Historia de posiciones para la compensacion de latencia. */
   histX: Float32Array;
@@ -509,6 +512,7 @@ export function createShooterWorld(map: ShooterMap, rules: ShooterRules): Shoote
     inFire: new Uint8Array(n),
     inJump: new Uint8Array(n),
     inInteract: new Uint8Array(n),
+    inReload: new Uint8Array(n),
 
     histX: new Float32Array(n * HISTORY_TICKS),
     histY: new Float32Array(n * HISTORY_TICKS),
@@ -629,6 +633,7 @@ export function setInput(world: ShooterWorld, seat: number, input: ShooterInput)
   // El salto y la interaccion son flancos: se guardan hasta que un paso los consuma.
   if (input.jump) world.inJump[seat] = 1;
   if (input.interact) world.inInteract[seat] = 1;
+  if (input.reload) world.inReload[seat] = 1;
   // El color entra directo: no lo lee ninguna regla, asi que no necesita
   // esperar al paso. Un indice fuera de rango se ignora en vez de pintar
   // negro: es la diferencia entre un cliente viejo y un jugador invisible.
@@ -1497,6 +1502,7 @@ export function stepWorld(world: ShooterWorld, dt: number, rng: Rng): number {
     inputScratch.fire = world.inFire[seat] === 1;
     inputScratch.jump = world.inJump[seat] === 1;
     inputScratch.interact = false;
+    inputScratch.reload = false;
     world.inJump[seat] = 0;
 
     simulateBody(bodyScratch, inputScratch, dt, world.map, world.rules, playing);
@@ -1535,6 +1541,19 @@ export function stepWorld(world: ShooterWorld, dt: number, rng: Rng): number {
     }
     // La dispersion se cierra sola al dejar de disparar.
     world.spread[seat] = Math.max(0, (world.spread[seat] ?? 0) - 0.18 * dt);
+
+    /*
+     * Recarga a mano: se consume el flanco aunque no se pueda usar, para que
+     * no quede guardado y salte solo tres segundos despues. Solo entra si
+     * falta agua y no se esta recargando ya.
+     */
+    if (world.inReload[seat] === 1) {
+      world.inReload[seat] = 0;
+      if (playing && (world.reload[seat] ?? 0) <= 0 && (world.ammo[seat] ?? 0) < spec.magazine) {
+        world.reload[seat] = spec.reloadS;
+        world.events |= EVENT_RELOAD;
+      }
+    }
 
     if (!playing || world.inFire[seat] !== 1 || (world.driving[seat] ?? -1) >= 0) continue;
     if ((world.cooldown[seat] ?? 0) > 0 || (world.reload[seat] ?? 0) > 0) continue;
@@ -1769,6 +1788,7 @@ export function botThink(world: ShooterWorld, seat: number, dt: number, rng: Rng
   }
   out.jump = false;
   out.interact = false;
+  out.reload = false;
   // Un bot no elige color: se queda con el de su asiento. Sin esto, el
   // scratch de input compartido los pintaria a todos del mismo.
   out.skin = seat % SKIN_COUNT;

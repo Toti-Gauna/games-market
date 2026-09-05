@@ -221,6 +221,8 @@ export type ShooterView = {
   ownDriving: number;
   /** El boton/tecla de interactuar pidio algo desde el ultimo paso. */
   interactQueued: boolean;
+  /** Idem para la recarga a mano. */
+  reloadQueued: boolean;
   /** Que se puede hacer ahora (`HINT_*`). Para el aviso en pantalla. */
   interactHint: number;
   /** Cofres que abrio el jugador local. */
@@ -393,6 +395,7 @@ export function createView(options: {
     cooldown: 0,
     ownDriving: -1,
     interactQueued: false,
+    reloadQueued: false,
     interactHint: HINT_NONE,
     chestsOpened: 0,
     playSfx: null,
@@ -566,8 +569,10 @@ function hostLocalInput(view: ShooterView, world: ShooterWorld, sticks: StickSam
   input.fire = sticks.fire;
   input.jump = sticks.jump;
   input.interact = view.interactQueued;
+  input.reload = view.reloadQueued;
   input.skin = view.ownSkin;
   view.interactQueued = false;
+  view.reloadQueued = false;
   setInput(world, 0, input);
 }
 
@@ -800,17 +805,21 @@ export function clientStep(view: ShooterView, dt: number, sticks: StickSample): 
     input.fire = sticks.fire;
     input.jump = sticks.jump;
     input.interact = view.interactQueued;
+    input.reload = view.reloadQueued;
     input.skin = view.ownSkin;
     view.interactQueued = false;
+    const reloadNow = view.reloadQueued;
+    view.reloadQueued = false;
     // El color propio se ve en el acto, sin esperar a que vuelva por red.
     view.skin[view.seat] = view.ownSkin;
 
     const sequence = prediction.predict(input);
     view.send?.(input, sequence);
     if (view.ownDriving < 0) copyPredicted(view, prediction.predicted);
-    stepLocalWeapon(view, dt, input.fire);
+    stepLocalWeapon(view, dt, input.fire, reloadNow);
   } else {
     view.interactQueued = false;
+    view.reloadQueued = false;
   }
 
   view.outsideRing =
@@ -848,7 +857,7 @@ function copyBodyToArrays(view: ShooterView): void {
  * que el cargador, la recarga y el retroceso se sientan en el acto en vez de
  * 100 ms despues; si difiere en un tiro, el host tiene razon y no se nota.
  */
-function stepLocalWeapon(view: ShooterView, dt: number, fire: boolean): void {
+function stepLocalWeapon(view: ShooterView, dt: number, fire: boolean, reloadNow: boolean): void {
   const spec = view.ownSpec;
   if (view.cooldown > 0) view.cooldown -= dt;
   if (view.reloadLeft > 0) {
@@ -857,6 +866,11 @@ function stepLocalWeapon(view: ShooterView, dt: number, fire: boolean): void {
       view.reloadLeft = 0;
       view.ammo = spec.magazine;
     }
+    return;
+  }
+  // A mano, con el mismo criterio que el host: solo si falta agua.
+  if (reloadNow && view.ammo < spec.magazine) {
+    view.reloadLeft = spec.reloadS;
     return;
   }
   if (view.ammo <= 0) {

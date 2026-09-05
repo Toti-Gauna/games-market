@@ -11,7 +11,7 @@ import { HudStat } from "@/ui/game/GameStage";
 import { TouchSticks } from "@/ui/game/TouchSticks";
 import { createSticksState, type SticksState } from "@/ui/game/sticks";
 import { ShooterScene } from "./ShooterScene";
-import { MAX_PLAYERS, createShooterMap } from "./map";
+import { MAX_PLAYERS, WEAPON_ASPERSOR, WEAPON_CANON, WEAPON_MANGUERA, createShooterMap } from "./map";
 import {
   MATCH_SECONDS,
   RING_SCHEDULE,
@@ -118,8 +118,9 @@ type HudState = {
   hp: number;
   ammo: number;
   magazine: number;
-  /** Nombre corto del arma en mano. */
+  /** Nombre corto del arma en mano y cual es, para el color. */
   weapon: string;
+  weaponKind: number;
   /** Que puede hacer el boton de interactuar ahora (`HINT_*` de view.ts). */
   interactHint: number;
   driving: boolean;
@@ -168,6 +169,7 @@ function readHud(view: ShooterView, connected: number): HudState {
     ammo: view.ammo,
     magazine: view.ownSpec.magazine,
     weapon: view.ownSpec.name,
+    weaponKind: view.ownWeapon,
     interactHint: view.interactHint,
     driving: view.ownDriving >= 0,
     reloading: view.reloadLeft > 0 ? 1 - view.reloadLeft / Math.max(0.01, view.ownSpec.reloadS) : 0,
@@ -488,16 +490,20 @@ export default function ShooterGame({ config, signal, onFinish, onReady }: GameP
   const interact = useCallback(() => {
     view.interactQueued = true;
   }, [view]);
+  const reload = useCallback(() => {
+    view.reloadQueued = true;
+  }, [view]);
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
-      if (event.code !== "KeyE" || event.repeat) return;
+      if (event.repeat) return;
       const target = event.target as HTMLElement | null;
       if (target && /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName)) return;
-      interact();
+      if (event.code === "KeyE") interact();
+      else if (event.code === "KeyR") reload();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [interact]);
+  }, [interact, reload]);
 
   const ringLabel =
     hud.state < 2
@@ -613,6 +619,8 @@ export default function ShooterGame({ config, signal, onFinish, onReady }: GameP
           hostPlaying={hostPlaying}
           onToggleHost={toggleHostPlaying}
           onInteract={interact}
+          onReload={reload}
+          view={view}
         />
       }
       summary={<Summary hud={hud} isHost={isHost} seat={seat} />}
@@ -644,6 +652,17 @@ function seatColor(seat: number): string {
   return token ? `var(${token})` : "var(--sn-text)";
 }
 
+/**
+ * El color de cada arma, el mismo que lleva el cofre que la da: se aprende
+ * una vez mirando el halo y despues se sabe que hay adentro antes de abrirlo.
+ */
+function weaponColor(kind: number): string {
+  if (kind === WEAPON_CANON) return "var(--sn-warn)";
+  if (kind === WEAPON_MANGUERA) return "var(--sn-violet-300)";
+  if (kind === WEAPON_ASPERSOR) return "var(--sn-cyan-400)";
+  return "var(--sn-text)";
+}
+
 function ShooterOverlay({
   hud,
   sticks,
@@ -653,6 +672,8 @@ function ShooterOverlay({
   hostPlaying,
   onToggleHost,
   onInteract,
+  onReload,
+  view,
 }: {
   hud: HudState;
   sticks: SticksState;
@@ -662,6 +683,8 @@ function ShooterOverlay({
   hostPlaying: boolean;
   onToggleHost: () => void;
   onInteract: () => void;
+  onReload: () => void;
+  view: ShooterView;
 }) {
   const inPlay = fpv && !hud.spectating && hud.state >= 1 && hud.state < 3;
   const interactLabel =
@@ -776,7 +799,10 @@ function ShooterOverlay({
               </div>
             </div>
             <div className="flex flex-col items-start">
-              <span className="text-[10px] uppercase tracking-[0.18em] text-sn-muted">
+              <span
+                className="text-[10px] uppercase tracking-[0.18em]"
+                style={{ color: hud.driving ? "var(--sn-text-muted)" : weaponColor(hud.weaponKind) }}
+              >
                 {hud.driving ? "Al volante" : hud.weapon}
               </span>
               <span className="sn-num text-2xl font-bold leading-none" style={{ color: hud.ammo === 0 ? "var(--sn-warn)" : "var(--sn-text)" }}>
@@ -788,13 +814,33 @@ function ShooterOverlay({
                   className="h-full rounded-full"
                   style={{
                     width: `${hud.reloading > 0 ? hud.reloading * 100 : (hud.ammo / Math.max(1, hud.magazine)) * 100}%`,
-                    background: hud.reloading > 0 ? "var(--sn-warn)" : "var(--sn-magenta-400)",
+                    background: hud.reloading > 0 ? "var(--sn-warn)" : weaponColor(hud.weaponKind),
                   }}
                 />
               </div>
             </div>
           </div>
         </>
+      )}
+
+      {/* El minimapa, mientras se juega en primera persona. */}
+      {inPlay && <Minimap view={view} />}
+
+      {/* Recargar a mano, sin esperar a quedarse seco. */}
+      {inPlay && !hud.driving && hud.reloading === 0 && hud.ammo < hud.magazine && (
+        <button
+          type="button"
+          onClick={onReload}
+          className="pointer-events-auto absolute bottom-3 right-3 rounded-full px-3 py-1.5 text-xs font-semibold"
+          style={{
+            background: "color-mix(in srgb, var(--sn-panel) 88%, transparent)",
+            color: hud.ammo === 0 ? "var(--sn-warn)" : "var(--sn-text-muted)",
+            border: `1px solid ${hud.ammo === 0 ? "var(--sn-warn)" : "var(--sn-line)"}`,
+          }}
+          data-game-ui
+        >
+          Recargar · R
+        </button>
       )}
 
       {/* Interactuar: un cofre cerrado o un auto al alcance. */}
@@ -921,6 +967,126 @@ function ShooterOverlay({
         </div>
       )}
     </div>
+  );
+}
+
+/** Cuanto lado tiene el minimapa en pixeles. */
+const MINIMAP_PX = 132;
+/** Hasta que distancia se ven los cofres y los autos. El resto se busca. */
+const MINIMAP_REVEAL = 55;
+
+/**
+ * El minimapa: el valle entero visto de arriba, con el anillo, lo que hay
+ * cerca y hacia donde se esta mirando.
+ *
+ * Dibuja en un `<canvas>` 2D con su propio rAF en vez de re-renderizar React:
+ * la posicion cambia sesenta veces por segundo y el HUD se muestrea diez.
+ *
+ * Muestra el anillo siempre —es lo que hay que saber para no morirse— pero
+ * los cofres y los autos solo cerca: un mapa que revela los dieciocho cofres
+ * de entrada convierte la exploracion en una lista de mandados.
+ */
+function Minimap({ view }: { view: ShooterView }) {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    const ctx = canvas?.getContext("2d");
+    if (!canvas || !ctx) return;
+    const styles = getComputedStyle(document.documentElement);
+    const color = (token: string) => styles.getPropertyValue(token).trim() || "#fff";
+    const panel = color("--sn-bg-elev");
+    const line = color("--sn-line");
+    const water = color("--sn-water-400");
+    const grass = color("--sn-grass-600");
+    const rock = color("--sn-rock-600");
+    const text = color("--sn-text");
+
+    const size = view.map.size;
+    const scale = MINIMAP_PX / size;
+    const toPx = (world: number) => (world + size / 2) * scale;
+
+    let raf = 0;
+    const draw = () => {
+      raf = requestAnimationFrame(draw);
+      ctx.clearRect(0, 0, MINIMAP_PX, MINIMAP_PX);
+      ctx.fillStyle = panel;
+      ctx.fillRect(0, 0, MINIMAP_PX, MINIMAP_PX);
+
+      // El valle: un rectangulo de pasto con las montanias marcadas.
+      ctx.fillStyle = grass;
+      ctx.globalAlpha = 0.35;
+      ctx.fillRect(0, 0, MINIMAP_PX, MINIMAP_PX);
+      ctx.globalAlpha = 0.55;
+      ctx.fillStyle = rock;
+      for (const mountain of view.map.mountains) {
+        ctx.beginPath();
+        ctx.arc(toPx(mountain.x), toPx(mountain.z), mountain.radius * scale, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      ctx.globalAlpha = 1;
+
+      // El anillo: donde hay que estar.
+      if (view.ringRadius > 0) {
+        ctx.strokeStyle = water;
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        ctx.arc(toPx(view.ringX), toPx(view.ringZ), view.ringRadius * scale, 0, Math.PI * 2);
+        ctx.stroke();
+      }
+
+      const px = view.body.x;
+      const pz = view.body.z;
+
+      // Cofres cerrados y autos libres, solo los de cerca.
+      for (let i = 0; i < view.map.chests.length; i++) {
+        const chest = view.map.chests[i];
+        if (!chest || (view.chestOpened & (1 << i)) !== 0) continue;
+        if (Math.hypot(chest.x - px, chest.z - pz) > MINIMAP_REVEAL) continue;
+        ctx.fillStyle = text;
+        ctx.fillRect(toPx(chest.x) - 1.5, toPx(chest.z) - 1.5, 3, 3);
+      }
+      for (let car = 0; car < view.carCount; car++) {
+        const cx = view.carX[car] ?? 0;
+        const cz = view.carZ[car] ?? 0;
+        if (Math.hypot(cx - px, cz - pz) > MINIMAP_REVEAL) continue;
+        ctx.strokeStyle = text;
+        ctx.lineWidth = 1;
+        ctx.strokeRect(toPx(cx) - 2.5, toPx(cz) - 2.5, 5, 5);
+      }
+
+      // Uno mismo: un triangulo que apunta hacia donde mira. Adelante es
+      // (-sin yaw, -cos yaw), la convencion de camara de three.
+      const yaw = view.camYaw;
+      const fx = -Math.sin(yaw);
+      const fz = -Math.cos(yaw);
+      const cx = toPx(px);
+      const cz = toPx(pz);
+      ctx.fillStyle = text;
+      ctx.beginPath();
+      ctx.moveTo(cx + fx * 5, cz + fz * 5);
+      ctx.lineTo(cx - fx * 3 - fz * 3, cz - fz * 3 + fx * 3);
+      ctx.lineTo(cx - fx * 3 + fz * 3, cz - fz * 3 - fx * 3);
+      ctx.closePath();
+      ctx.fill();
+
+      ctx.strokeStyle = line;
+      ctx.lineWidth = 1;
+      ctx.strokeRect(0.5, 0.5, MINIMAP_PX - 1, MINIMAP_PX - 1);
+    };
+    raf = requestAnimationFrame(draw);
+    return () => cancelAnimationFrame(raf);
+  }, [view]);
+
+  return (
+    <canvas
+      ref={canvasRef}
+      width={MINIMAP_PX}
+      height={MINIMAP_PX}
+      // Debajo de los chips del HUD, que ocupan dos filas en el proyector.
+      className="pointer-events-none absolute left-3 top-32 rounded-lg"
+      style={{ border: "1px solid var(--sn-line)", opacity: 0.92 }}
+    />
   );
 }
 
