@@ -1695,14 +1695,33 @@ export function botThink(world: ShooterWorld, seat: number, dt: number, rng: Rng
     world.botAimYaw[seat] = rng.range(-1, 1) * world.rules.botAimError * spreadScale;
     world.botAimPitch[seat] = rng.range(-1, 1) * world.rules.botAimError * 0.6 * spreadScale;
     if (target < 0) {
-      // Punto de paseo: adentro del anillo, con margen, y en terreno que se
-      // camine. Tres intentos; si todos caen en ladera, se va igual y el
-      // detector de atasco lo saca.
+      /*
+       * Punto de paseo: cerca de donde ya esta, no del centro del anillo.
+       *
+       * Es la diferencia entre una partida de cinco minutos y una de treinta
+       * segundos. Con el anillo abierto —que al principio es el mapa entero—
+       * pasear "hacia adentro del anillo" manda a los diez al mismo lugar, y
+       * se matan entre todos antes de que nadie llegue a jugar. Paseando
+       * cerca se quedan repartidos, y lo que los junta es el anillo cuando
+       * cierra, que es de donde tiene que venir el encuentro.
+       *
+       * Tres intentos por si cae en una ladera; si todos fallan, se va igual
+       * y el detector de atasco lo saca.
+       */
       for (let attempt = 0; attempt < 3; attempt++) {
         const angle = rng.range(0, Math.PI * 2);
-        const radius = rng.range(6, Math.max(8, world.ringRadius * 0.7));
-        const wx = clamp(world.ringX + Math.cos(angle) * radius, -HALF + 4, HALF - 4);
-        const wz = clamp(world.ringZ + Math.sin(angle) * radius, -HALF + 4, HALF - 4);
+        const radius = rng.range(10, 34);
+        let wx = x + Math.cos(angle) * radius;
+        let wz = z + Math.sin(angle) * radius;
+        // Que el destino quede adentro del anillo: el anillo si manda.
+        const keep = Math.max(4, world.ringRadius - 8);
+        const d = Math.hypot(wx - world.ringX, wz - world.ringZ);
+        if (d > keep && d > 1e-6) {
+          wx = world.ringX + ((wx - world.ringX) / d) * keep;
+          wz = world.ringZ + ((wz - world.ringZ) / d) * keep;
+        }
+        wx = clamp(wx, -HALF + 4, HALF - 4);
+        wz = clamp(wz, -HALF + 4, HALF - 4);
         world.botWanderX[seat] = wx;
         world.botWanderZ[seat] = wz;
         if (terrainSlope(world.map, wx, wz) < 0.6) break;
@@ -1787,8 +1806,15 @@ export function botThink(world: ShooterWorld, seat: number, dt: number, rng: Rng
     world.botStuck[seat] = 0;
   }
   out.jump = false;
-  out.interact = false;
   out.reload = false;
+  /*
+   * Un bot abre el cofre que le queda al paso, si no tiene a nadie a la
+   * vista. No lo busca: se lo lleva el que pasa. Alcanza para que los cofres
+   * se usen en una partida sin gente y para que el que llega tarde no
+   * encuentre el valle intacto. Manejar, no maneja: queda pendiente.
+   */
+  out.interact =
+    target < 0 && nearestClosedChest(world.map, world.chestOpened, x, z) >= 0;
   // Un bot no elige color: se queda con el de su asiento. Sin esto, el
   // scratch de input compartido los pintaria a todos del mismo.
   out.skin = seat % SKIN_COUNT;

@@ -850,6 +850,13 @@ describe("bots", () => {
     expect(world.phase).toBe("over");
     expect(world.winner).toBeGreaterThanOrEqual(0);
     expect(world.deaths).toBeGreaterThan(0);
+    /*
+     * Y dura una partida, no una escaramuza. Con los bots paseando hacia el
+     * centro del anillo —que al principio es el mapa entero— los diez se
+     * juntaban de entrada y todo terminaba en medio minuto. Lo que tiene que
+     * juntarlos es el anillo al cerrar.
+     */
+    expect(steps / 60).toBeGreaterThan(120);
   });
 });
 
