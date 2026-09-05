@@ -186,6 +186,16 @@ function GameLab({ entry }: { entry: GameEntry }) {
     if (urlSeed) setRunSeed(urlSeed.slice(0, 16));
   }, [urlSeed]);
 
+  /*
+   * Y el transporte. Un celular que entra como jugador arma su propia red con
+   * `useGameNet`, asi que tiene que saber por donde: si el proyector esta en
+   * WebRTC y el telefono abre un BroadcastChannel, no se ven nunca.
+   */
+  const urlTransport = searchParams.get("transporte");
+  useEffect(() => {
+    if (urlTransport === "webrtc" || urlTransport === "local") patchPrefs({ transport: urlTransport });
+  }, [urlTransport, patchPrefs]);
+
   const config: GameRuntimeConfig = useMemo(
     () => ({
       roomId: `lab-${entry.id}`,
@@ -229,7 +239,9 @@ function GameLab({ entry }: { entry: GameEntry }) {
       // asi que el QR invita al siguiente. En un `solo` no hay con quien
       // chocar y el asiento es el mismo.
       const seat = entry.needsNet ? prefs.seat + 2 : prefs.seat + 1;
-      url.hash = `#/juego/${entry.id}?asiento=${seat}${seedParam}`;
+      // El transporte viaja igual que en el QR de control: el celular tiene que
+      // entrar por la misma red que el proyector o nunca se ven.
+      url.hash = `#/juego/${entry.id}?asiento=${seat}${seedParam}&transporte=${prefs.transport}`;
     } else {
       /*
        * `asientos` son los del JUEGO, no los que simula el banco de pruebas.

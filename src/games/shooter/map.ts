@@ -135,44 +135,64 @@ export function createShooterMap(rng: Rng): ShooterMap {
   const flip = rng.chance(0.5);
   const platformOffset = 22;
   const platformHeight = 4;
+  /*
+   * Macizas desde el piso, no losas flotantes. Una losa a cuatro metros deja
+   * pasar por abajo, no corta ninguna linea de tiro y se ve como un error de
+   * fisica; un bloque es cobertura grande, tapa a quien esta detras y se sube
+   * por la rampa. La tapa queda a `platformTop`, que es donde llega la rampa.
+   */
+  const platformTop = platformHeight + 0.5;
   const platforms: MapBox[] = [
     {
       x: flip ? -platformOffset : platformOffset,
-      y: platformHeight,
+      y: platformTop / 2,
       z: -platformOffset,
       w: 16,
-      h: 1,
+      h: platformTop,
       d: 16,
     },
     {
       x: flip ? platformOffset : -platformOffset,
-      y: platformHeight,
+      y: platformTop / 2,
       z: platformOffset,
       w: 16,
-      h: 1,
+      h: platformTop,
       d: 16,
     },
   ];
 
   /*
-   * Una rampa por plataforma, apuntando al centro. Es la unica forma de subir:
+   * Una rampa por plataforma, del lado del centro. Es la unica forma de subir:
    * la guia descarta las escaleras porque con control tactil son intratables.
+   *
+   * Tres numeros que tienen que cerrar entre si o la rampa no sirve:
+   *
+   * - **Sube hacia la plataforma.** La geometria sube hacia +x local, asi que
+   *   el `yaw` apunta desde el centro del mapa hacia la plataforma, no al reves.
+   * - **Su punta alta coincide con el borde de la plataforma.** El centro va a
+   *   media plataforma mas media rampa: si la rampa se metiera adentro de la
+   *   plataforma, el cuerpo chocaria contra el costado antes de llegar arriba.
+   * - **Llega a la altura de la tapa**, no a la del centro de la plataforma:
+   *   con medio metro de escalon al final, nadie sube sin saltar.
    */
+  const rampLength = 10;
+  const platformHalf = 8;
   const ramps: MapRamp[] = platforms.map((platform) => {
     const toCenter = Math.atan2(-platform.z, -platform.x);
+    const distance = platformHalf + rampLength / 2;
     return {
-      x: platform.x + Math.cos(toCenter) * 11,
-      y: platformHeight / 2,
-      z: platform.z + Math.sin(toCenter) * 11,
-      w: 10,
-      h: platformHeight,
+      x: platform.x + Math.cos(toCenter) * distance,
+      y: platformTop / 2,
+      z: platform.z + Math.sin(toCenter) * distance,
+      w: rampLength,
+      h: platformTop,
       d: 6,
-      yaw: toCenter,
+      yaw: toCenter + Math.PI,
     };
   });
 
   const spawns = placeSpawns(rng, landmark);
-  const cover = placeCover(rng, landmark, platforms, spawns);
+  const cover = placeCover(rng, landmark, platforms, ramps, spawns);
 
   /*
    * El centro del anillo se mueve dentro de un radio moderado. Lejos del borde
@@ -232,12 +252,24 @@ function placeCover(
   rng: Rng,
   landmark: MapBox,
   platforms: readonly MapBox[],
+  ramps: readonly MapRamp[],
   spawns: readonly Vec2[],
 ): MapBox[] {
   const target = rng.int(COVER_MIN, COVER_MAX);
   const cover: MapBox[] = [];
   const limit = HALF - EDGE_MARGIN;
   let attempts = 0;
+
+  /*
+   * Las rampas estan giradas, asi que su caja en planta no es su `w x d`. Se
+   * reservan con un cuadrado del lado mayor: sobra un poco de aire alrededor,
+   * que es preferible a un bloque sentado sobre la subida. Un bloque en la
+   * rampa es la unica forma de subir tapada, y no se ve hasta que se juega.
+   */
+  const rampFootprints: MapBox[] = ramps.map((ramp) => {
+    const side = Math.max(ramp.w, ramp.d);
+    return { x: ramp.x, y: ramp.y, z: ramp.z, w: side, h: ramp.h, d: side };
+  });
 
   while (cover.length < target && attempts < 6000) {
     attempts++;
@@ -252,6 +284,7 @@ function placeCover(
     if (distance(candidate, { x: landmark.x, z: landmark.z }) < LANDMARK_CLEARANCE) continue;
     if (spawns.some((spawn) => distance(spawn, candidate) < 5)) continue;
     if (platforms.some((platform) => overlaps(candidate, platform, 1))) continue;
+    if (rampFootprints.some((ramp) => overlaps(candidate, ramp, 1))) continue;
     if (cover.some((placed) => overlaps(candidate, placed, 1.5))) continue;
 
     cover.push(candidate);

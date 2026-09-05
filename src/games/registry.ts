@@ -15,6 +15,8 @@ import { corredorSettings } from "./corredor/settings";
 import { futbolSettings } from "./futbol/settings";
 import { carrerasSettings } from "./carreras/settings";
 import { poolSettings } from "./pool/settings";
+import { metaversoSettings } from "./metaverso/settings";
+import { shooterSettings } from "./shooter/settings";
 
 /**
  * Los 24 juegos de games-guide.
@@ -437,18 +439,21 @@ export const GAMES: readonly GameEntry[] = [
     // 3D en pestana propia: no compite por el hilo principal con el catalogo,
     // y cerrarla libera el contexto de GPU. Ver opensInTab.
     launch: "tab",
-    status: "planned",
+    status: "beta",
     effort: "XL",
     batch: 11,
-    enabled: false,
+    enabled: true,
     needsNet: true,
     minPlayers: 1,
     maxPlayers: 20,
+    // El celular es un avatar en primera persona; el proyector, la vista aerea.
+    phoneRole: "player",
     inputs: ["touch", "keyboard"],
     estimatedMin: 10,
     tags: ["3D", "avatares", "social"],
     guide: "X5-METAVERSO.md",
-    settings: [],
+    settings: metaversoSettings,
+    load: () => import("./metaverso/MetaversoGame"),
   },
   {
     id: "shooter",
@@ -462,26 +467,28 @@ export const GAMES: readonly GameEntry[] = [
     // y cerrarla libera el contexto de GPU. Ver opensInTab.
     launch: "tab",
     /*
-     * `draft` y no `beta`: lo que hay implementado es la fase 1 de 7 —la
-     * prueba de rendimiento que la guia exige antes de escribir gameplay—, no
-     * el juego. Se puede abrir desde el banco de pruebas justamente para
-     * medirlo en un celular, que es la puerta para seguir.
+     * `beta`: jugable de punta a punta —mapa por semilla, hitscan con
+     * compensacion de latencia, anillo, bots, prediccion en el celular— y
+     * todavia sin partidas de verdad encima. Estable cuando lo hayan jugado.
      */
-    status: "draft",
+    status: "beta",
     effort: "XL",
     batch: 11,
-    enabled: false,
+    enabled: true,
     needsNet: true,
-    minPlayers: 2,
+    minPlayers: 1,
     maxPlayers: 10,
-    // Sin inclinacion y sin teclado: la guia fija stick tactil y arrastre.
-    inputs: ["touch"],
+    // El celular es el jugador, no un mando: abre el juego en primera persona.
+    phoneRole: "player",
+    // Stick tactil y arrastre en el celular; teclado y mouse para probar en
+    // escritorio. Sin inclinacion: la guia la descarta para apuntar.
+    inputs: ["touch", "keyboard"],
     estimatedMin: 8,
     // `three-mesh-bvh` NO se usa: el hitscan va contra diez capsulas, y una
     // lista de AABB es mas rapida que construir un BVH. Lo corrige la guia.
     tags: ["shooter", "battle royale", "el más caro"],
     guide: "X4-SHOOTER-3D.md",
-    settings: [],
+    settings: shooterSettings,
     load: () => import("./shooter/ShooterGame"),
   },
 ];

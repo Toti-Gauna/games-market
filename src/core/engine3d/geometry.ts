@@ -3,9 +3,11 @@ import {
   BufferAttribute,
   BufferGeometry,
   CapsuleGeometry,
+  CircleGeometry,
   ConeGeometry,
   CylinderGeometry,
   ExtrudeGeometry,
+  Float32BufferAttribute,
   Matrix4,
   Shape,
   SphereGeometry,
@@ -48,6 +50,8 @@ import {
 
 export type GeometryKey =
   | "box"
+  | "boxShaded"
+  | "disc"
   | "cylinder"
   | "capsule"
   | "sphere"
@@ -93,6 +97,12 @@ function build(key: GeometryKey): BufferGeometry {
     case "box":
       return new BoxGeometry(1, 1, 1);
 
+    case "boxShaded":
+      return buildBoxShaded();
+
+    case "disc":
+      return buildDisc();
+
     case "cylinder":
       // 16 lados: por debajo se ve el poligono, por encima no se nota nada.
       return new CylinderGeometry(0.5, 0.5, 1, 16);
@@ -121,6 +131,46 @@ function build(key: GeometryKey): BufferGeometry {
     case "avatar":
       return buildAvatar();
   }
+}
+
+/**
+ * Caja con sombreado horneado en los vertices.
+ *
+ * Es lo que hace que una caja de color plano se lea como un volumen y no como
+ * un recorte: la tapa va clara, los lados a medio tono y la base oscura. El
+ * material tiene que pedirse con `vertexColors: true`, y el color por vertice
+ * MULTIPLICA al del material: blanco arriba es "el color del material tal
+ * cual", gris abajo es "el mismo, mas oscuro". Cuesta cero: es un atributo
+ * mas en el buffer que ya existia.
+ */
+function buildBoxShaded(): BufferGeometry {
+  const geometry = new BoxGeometry(1, 1, 1);
+  const normals = geometry.getAttribute("normal");
+  const count = normals.count;
+  const colors = new Float32Array(count * 3);
+  for (let i = 0; i < count; i++) {
+    const nx = normals.getX(i);
+    const ny = normals.getY(i);
+    const nz = normals.getZ(i);
+    // Arriba 1.0, los lados que dan a +x/+z un poco mas claros que los
+    // opuestos (una direccional imaginaria), y abajo apenas visible.
+    let shade = 0.62;
+    if (ny > 0.5) shade = 1.0;
+    else if (ny < -0.5) shade = 0.35;
+    else if (nx > 0.5 || nz > 0.5) shade = 0.74;
+    colors[i * 3] = shade;
+    colors[i * 3 + 1] = shade;
+    colors[i * 3 + 2] = shade;
+  }
+  geometry.setAttribute("color", new Float32BufferAttribute(colors, 3));
+  return geometry;
+}
+
+/** Disco horizontal de diametro 1, mirando hacia arriba. Para halos y sombras. */
+function buildDisc(): BufferGeometry {
+  const geometry = new CircleGeometry(0.5, 20);
+  geometry.rotateX(-Math.PI / 2);
+  return geometry;
 }
 
 /**

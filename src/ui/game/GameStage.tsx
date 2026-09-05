@@ -41,6 +41,16 @@ export type GameStageProps = {
    * ninguna de esas cosas, solo les hace lugar.
    */
   introExtra?: ReactNode;
+  /**
+   * Una capa de DOM ENTRE la superficie y el HUD, que cubre el contenedor.
+   *
+   * Es para lo que tiene que estar encima del canvas y abajo de los botones:
+   * los sticks tactiles de un juego en primera persona, una mira, un
+   * indicador de dano. No puede ir en `hud` —eso es una barra arriba que no
+   * recibe clicks— y no puede ir adentro de la superficie, que en 3D es un
+   * `<Canvas>` donde no entra DOM.
+   */
+  overlay?: ReactNode;
   muted: boolean;
   onToggleMuted: () => void;
   onStart: () => void;
@@ -63,6 +73,7 @@ export function GameStage({
   hud,
   summary,
   introExtra,
+  overlay,
   muted,
   onToggleMuted,
   onStart,
@@ -92,6 +103,12 @@ export function GameStage({
           <div className="absolute inset-0">{surface}</div>
         ) : (
           <canvas ref={canvasRef} className="block" />
+        )}
+
+        {/* La capa del juego: encima del canvas, debajo del HUD. Solo mientras
+            se juega, para que no tape la pantalla de instrucciones. */}
+        {overlay !== undefined && phase === "playing" && (
+          <div className="absolute inset-0">{overlay}</div>
         )}
 
         {/* HUD: no se come los clicks del juego. */}

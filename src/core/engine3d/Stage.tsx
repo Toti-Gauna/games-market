@@ -5,6 +5,7 @@ import type { GamePhase } from "@/core/engine/useGameLifecycle";
 import { GameStage } from "@/ui/game/GameStage";
 import { disposeGeometries } from "./geometry";
 import { disposeMaterials } from "./materials";
+import { disposeShaders } from "./shaders";
 
 /**
  * El escenario 3D: el `<Canvas>` de R3F con todo lo que hay que acertar una
@@ -82,6 +83,8 @@ export type StageProps = {
   hud?: ReactNode;
   summary?: ReactNode;
   introExtra?: ReactNode;
+  /** Capa de DOM entre el canvas y el HUD: sticks, mira, indicadores. */
+  overlay?: ReactNode;
   muted: boolean;
   onToggleMuted: () => void;
   onStart: () => void;
@@ -125,6 +128,7 @@ export function Stage({
   hud,
   summary,
   introExtra,
+  overlay,
   muted,
   onToggleMuted,
   onStart,
@@ -158,6 +162,7 @@ export function Stage({
     return () => {
       disposeGeometries();
       disposeMaterials();
+      disposeShaders();
     };
   }, []);
 
@@ -235,6 +240,7 @@ export function Stage({
       {...(hud !== undefined ? { hud } : {})}
       {...(summary !== undefined ? { summary } : {})}
       {...(introExtra !== undefined ? { introExtra } : {})}
+      {...(overlay !== undefined ? { overlay } : {})}
       muted={muted}
       onToggleMuted={onToggleMuted}
       onStart={onStart}

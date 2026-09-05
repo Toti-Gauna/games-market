@@ -46,6 +46,14 @@ export type MaterialOptions = {
   roughness?: number;
   /** Solo `standard`. */
   metalness?: number;
+  /**
+   * Multiplica el color por el atributo `color` de la geometria. Es lo que
+   * enciende el sombreado horneado de `boxShaded` y la oclusion ambiental
+   * por vertice del piso: volumen sin una sola sombra dinamica.
+   */
+  vertexColors?: boolean;
+  /** Cuanto brilla el emisivo. 1 por defecto; mas de 1 para acentos que se ven de lejos. */
+  emissiveIntensity?: number;
 };
 
 const materials = new Map<string, Material>();
@@ -103,6 +111,8 @@ function cacheKey(token: PaletteToken, kind: MaterialKind, options: MaterialOpti
     options.emissive ?? "-",
     options.roughness ?? "-",
     options.metalness ?? "-",
+    options.vertexColors === true ? "vc" : "-",
+    options.emissiveIntensity ?? "-",
   ].join("|");
 }
 
@@ -114,23 +124,24 @@ function build(token: PaletteToken, kind: MaterialKind, options: MaterialOptions
     side: options.doubleSide === true ? DoubleSide : FrontSide,
     transparent: opacity < 1,
     opacity,
+    vertexColors: options.vertexColors === true,
   };
 
   if (kind === "basic") return new MeshBasicMaterial(shared);
 
   const emissive = options.emissive !== undefined ? getColor(options.emissive) : undefined;
+  const glow = emissive
+    ? { emissive, emissiveIntensity: options.emissiveIntensity ?? 1 }
+    : {};
 
   if (kind === "lambert") {
-    return new MeshLambertMaterial({
-      ...shared,
-      ...(emissive ? { emissive } : {}),
-    });
+    return new MeshLambertMaterial({ ...shared, ...glow });
   }
 
   return new MeshStandardMaterial({
     ...shared,
     roughness: options.roughness ?? 0.6,
     metalness: options.metalness ?? 0.1,
-    ...(emissive ? { emissive } : {}),
+    ...glow,
   });
 }
