@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import { NavLink } from "react-router-dom";
-import { opensInTab, type GameEntry } from "@/core/contract/catalog";
+import { opensInTab, standalonePlayUrl, type GameEntry } from "@/core/contract/catalog";
 
 /**
  * El enlace a un juego, que a veces no es un enlace de la aplicacion.
@@ -42,7 +42,9 @@ export function GameLaunchLink({
   if (opensInTab(game)) {
     return (
       <a
-        href={`#/juego/${game.id}`}
+        // Un juego con pagina propia abre AHI, no en el banco de pruebas: el
+        // banco es para construirlo, no para jugarlo.
+        href={game.standalonePlay === true ? standalonePlayUrl(game) : `#/juego/${game.id}`}
         target="_blank"
         // `noopener` no es opcional: sin el, la pestana nueva puede tocar el
         // `window.opener` de esta.

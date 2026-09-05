@@ -480,6 +480,8 @@ export const GAMES: readonly GameEntry[] = [
     maxPlayers: 10,
     // El celular es el jugador, no un mando: abre el juego en primera persona.
     phoneRole: "player",
+    // Tiene pagina propia a pantalla completa: `#/jugar/shooter`.
+    standalonePlay: true,
     // Stick tactil y arrastre en el celular; teclado y mouse para probar en
     // escritorio. Sin inclinacion: la guia la descarta para apuntar.
     inputs: ["touch", "keyboard"],

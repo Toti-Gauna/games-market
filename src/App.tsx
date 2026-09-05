@@ -13,6 +13,7 @@ const GameLabPage = lazy(() => import("@/routes/GameLabPage"));
 const RoadmapPage = lazy(() => import("@/routes/RoadmapPage"));
 const KioskPage = lazy(() => import("@/routes/KioskPage"));
 const ControlPage = lazy(() => import("@/routes/ControlPage"));
+const PlayPage = lazy(() => import("@/routes/PlayPage"));
 
 const router = createHashRouter([
   {
@@ -29,6 +30,8 @@ const router = createHashRouter([
   { path: "/quiosco", element: <KioskPage /> },
   // Idem: un celular haciendo de mando no es una pagina web.
   { path: "/control/:sala", element: <ControlPage /> },
+  // Y jugar de verdad: el juego solo, sin banco de pruebas ni sidebar.
+  { path: "/jugar/:id", element: <PlayPage /> },
 ]);
 
 export default function App() {

@@ -753,10 +753,15 @@ function driveCamera(
     const d = Math.hypot((view.x[seat] ?? 0) - cx, (view.z[seat] ?? 0) - cz);
     if (d > spread) spread = d;
   }
-  const radius = Math.min(130, Math.max(24, spread * 1.25 + 18));
+  /*
+   * Cerca y no lejos: con el tope alto la camara se iba a 130 unidades y el
+   * valle entero entraba en el cuadro, con la niebla alrededor, y se veia
+   * como una maqueta flotando. Encuadrando mas ajustado se ve un lugar.
+   */
+  const radius = Math.min(95, Math.max(24, spread * 1.1 + 16));
   const angle = view.reducedMotion ? 0.8 : 0.8 + view.elapsed * 0.07;
   const groundAt = terrainHeight(view.map, cx, cz);
-  scratch.camTarget.set(cx + Math.cos(angle) * radius, groundAt + 14 + radius * 0.72, cz + Math.sin(angle) * radius);
+  scratch.camTarget.set(cx + Math.cos(angle) * radius, groundAt + 12 + radius * 0.6, cz + Math.sin(angle) * radius);
   scratch.v.set(cx, groundAt + 1.2, cz);
 
   if (!scratch.settled) {

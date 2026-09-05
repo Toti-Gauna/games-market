@@ -48,6 +48,12 @@ export type GameEntry = {
    * Por eso se declara donde no coincide con el default.
    */
   phoneRole?: "control" | "player";
+  /**
+   * El juego tiene pagina propia (`#/jugar/:id`): sin sidebar, sin
+   * administrables y a pantalla completa. El banco de pruebas
+   * (`#/juego/:id`) sigue funcionando igual para desarrollarlo.
+   */
+  standalonePlay?: boolean;
   /** Archivo de games-guide que lo especifica. */
   guide: string;
   /** Administrables. Vacio mientras el juego no exista. */
@@ -124,6 +130,16 @@ export function isPlayable(entry: GameEntry): boolean {
  */
 export function opensInTab(entry: GameEntry): boolean {
   return entry.launch === "tab";
+}
+
+/**
+ * Adonde lleva "Jugar" cuando el juego tiene pagina propia.
+ *
+ * El asiento 1 es quien abre: es el host. Los demas entran por el codigo que
+ * esa pantalla reparte.
+ */
+export function standalonePlayUrl(entry: GameEntry): string {
+  return `#/jugar/${entry.id}?asiento=1`;
 }
 
 /** Un juego `solo` se juega en el propio telefono; el resto manda un mando. */
