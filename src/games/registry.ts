@@ -458,8 +458,8 @@ export const GAMES: readonly GameEntry[] = [
   {
     id: "shooter",
     code: "X4",
-    title: "Supernova Arena",
-    tagline: "Battle royale de 10, geometría desde cero.",
+    title: "Bubble Shooter Game",
+    tagline: "Battle royale de 10 a pistola de agua: montañas, cofres y un auto para cruzar el valle.",
     category: "creative",
     topology: "arena",
     engine: "r3f",

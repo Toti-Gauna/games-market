@@ -3,11 +3,13 @@ import { useFrame, useThree } from "@react-three/fiber";
 import {
   AdditiveBlending,
   CylinderGeometry,
+  Float32BufferAttribute,
   MeshBasicMaterial,
   PlaneGeometry,
   Quaternion,
   SphereGeometry,
   Vector3,
+  type BufferGeometry,
   type Group,
   type Mesh,
   type PerspectiveCamera,
@@ -15,10 +17,21 @@ import {
 import type { NetSnapshot } from "@/core/net/snapshot";
 import { getGeometry } from "@/core/engine3d/geometry";
 import { getColor, getMaterial } from "@/core/engine3d/materials";
-import { getGridFloorMaterial, getRingMaterial, getSkyMaterial, tickShaders } from "@/core/engine3d/shaders";
+import { getRingMaterial, getSkyMaterial, tickShaders } from "@/core/engine3d/shaders";
 import { createInstanceWriter, fillStatic, type InstanceWriter } from "@/core/engine3d/instancing";
 import { useFixedStep } from "@/core/engine3d/useFixedStep";
-import { MAP_SIZE, MAX_PLAYERS, type ShooterMap } from "./map";
+import {
+  MAP_SIZE,
+  MAX_CARS,
+  MAX_CHESTS,
+  MAX_PLAYERS,
+  WEAPON_CANON,
+  WEAPON_MANGUERA,
+  mountainHeight,
+  terrainHeight,
+  terrainSlope,
+  type ShooterMap,
+} from "./map";
 import { EYE_HEIGHT, groundHeight, lookDirection } from "./logic";
 import {
   SEAT_TOKENS,
@@ -31,32 +44,35 @@ import {
 } from "./view";
 
 /**
- * X4 · Supernova Arena — la escena.
+ * X4 · Bubble Shooter Game — la escena.
  *
  * Todo lo que se ve sale de `ShooterView`; aca no hay estado de juego, solo
  * buffers de instancias que se reescriben por cuadro y una camara. La regla
  * que decide si esto corre en un celular es una sola: **un draw call por
  * familia**. Diez jugadores son un draw call de cuerpos, uno de cabezas, uno
- * de visores, uno de armas y uno de sombras; treinta bloques de cobertura son
- * uno; todas las estelas, uno. La escena entera anda en ~26.
+ * de visores, uno de armas y uno de sombras; sesenta rocas son uno; todos los
+ * cofres, dos; los autos, tres; todas las estelas, uno.
  *
- * Lo que la hace linda sin pagar PBR ni sombras:
+ * Lo que la hace un lugar y no una grilla de cajas:
  *
- * - **Sombreado horneado.** Las cajas usan `boxShaded`: tapa clara, lados a
- *   medio tono, base oscura. Volumen sin una sola sombra dinamica.
- * - **Cielo de tres colores y piso con grilla**, los dos por shader. Es lo
- *   que le da al mapa la firma de la marca en vez de "cubos grises".
- * - **Niebla exponencial** del color del fondo: el borde del mundo se funde
- *   en vez de cortarse, y de paso recorta overdraw lejano.
- * - **Aditivo para lo que brilla**: destellos, estelas, chispas, balizas y
- *   el anillo. Sobre un fondo oscuro, aditivo es luz.
+ * - **El terreno es UNA malla** que sigue `terrainHeight` —la misma funcion
+ *   que usa la fisica, asi lo que se ve es exactamente lo que se pisa— con
+ *   el color horneado por vertice: pasto en el llano, roca en la ladera,
+ *   mas oscuro donde la pendiente aprieta. Sin texturas, sin sombras.
+ * - **Cielo de atardecer** por shader, con la niebla del mismo tono para que
+ *   el borde del mundo se funda en la luz en vez de cortarse.
+ * - **Aditivo para lo que brilla**: destellos, estelas, salpicaduras, halos
+ *   de cofre y el anillo. Sobre un atardecer, aditivo es luz.
  */
 
-const WALL_HEIGHT = 6;
-const RING_HEIGHT = 34;
-const SKY_RADIUS = 170;
+const WALL_HEIGHT = 3;
+const RING_HEIGHT = 40;
+const SKY_RADIUS = 300;
 const FOV_FPV = 78;
+const FOV_DRIVE = 68;
 const FOV_SPECTATOR = 58;
+/** Cuantas celdas por lado tiene la malla del terreno. */
+const TERRAIN_SEGMENTS = 120;
 
 export type ShooterSceneProps = {
   view: ShooterView;
@@ -69,23 +85,94 @@ export type ShooterSceneProps = {
 };
 
 export function ShooterScene(props: ShooterSceneProps) {
-  const fogColor = getColor("--sn-bg");
   return (
     <>
-      <fogExp2 attach="fog" args={[fogColor, 0.011]} />
-      <ambientLight intensity={0.32} />
+      <fogExp2 attach="fog" args={[getColor("--sn-sunset-low"), 0.0045]} />
+      <ambientLight intensity={0.25} />
       {/*
-        Hemisferica: cielo violeta arriba, fondo oscuro abajo. Es la luz que
-        hace que una capsula de un solo color no se vea plana desde ningun
-        angulo, y cuesta lo mismo que la ambiente.
+        Hemisferica: el cielo calido arriba, el pasto abajo. Es la luz que hace
+        que una capsula de un solo color no se vea plana desde ningun angulo.
       */}
-      <hemisphereLight args={[getColor("--sn-violet-300"), getColor("--sn-bg"), 0.75]} />
-      <directionalLight position={[30, 60, 20]} intensity={1.05} />
+      <hemisphereLight args={[getColor("--sn-sunset-horizon"), getColor("--sn-grass-600"), 0.85]} />
+      {/* El sol, bajo y calido. Sin sombras: el sombreado esta en los vertices. */}
+      <directionalLight position={[70, 55, -40]} intensity={1.15} color={getColor("--sn-sunset-horizon")} />
 
+      <Terrain map={props.view.map} />
       <Arena map={props.view.map} />
       <Runtime {...props} />
     </>
   );
+}
+
+/* ------------------------------------------------------------------ */
+/* El terreno                                                          */
+/* ------------------------------------------------------------------ */
+
+function smoothstep(a: number, b: number, t: number): number {
+  const x = Math.max(0, Math.min(1, (t - a) / (b - a)));
+  return x * x * (3 - 2 * x);
+}
+
+/**
+ * La malla del terreno: un plano subdividido, cada vertice a la altura que
+ * dice `terrainHeight`, con el color horneado segun pendiente y altura.
+ *
+ * Se construye una vez por mapa. 121 x 121 vertices son ~29 mil triangulos:
+ * es el objeto mas pesado de la escena y aun asi un solo draw call.
+ */
+function buildTerrain(map: ShooterMap): BufferGeometry {
+  const geometry = new PlaneGeometry(MAP_SIZE, MAP_SIZE, TERRAIN_SEGMENTS, TERRAIN_SEGMENTS);
+  geometry.rotateX(-Math.PI / 2);
+  const position = geometry.getAttribute("position");
+  const count = position.count;
+  const colors = new Float32Array(count * 3);
+
+  const grassA = getColor("--sn-grass-400");
+  const grassB = getColor("--sn-grass-600");
+  const rockA = getColor("--sn-rock-400");
+  const rockB = getColor("--sn-rock-600");
+
+  for (let i = 0; i < count; i++) {
+    const x = position.getX(i);
+    const z = position.getZ(i);
+    const h = terrainHeight(map, x, z);
+    position.setY(i, h);
+
+    let mountain = 0;
+    for (const m of map.mountains) mountain += mountainHeight(m, x, z);
+    const slope = terrainSlope(map, x, z);
+
+    // Roca donde la ladera aprieta o el cerro sube; pasto en el resto.
+    const rockiness = Math.min(1, smoothstep(0.45, 0.95, slope) + smoothstep(6, 20, mountain) * 0.65);
+    // Manchones de pasto: dos verdes mezclados con una onda barata.
+    const patch = 0.5 + 0.5 * Math.sin(x * 0.17 + z * 0.05) * Math.cos(z * 0.13 - x * 0.04);
+    const rockShade = smoothstep(4, 24, mountain);
+    // Oclusion horneada: la pendiente oscurece un poco, como sombra propia.
+    const shade = 1 - Math.min(0.35, slope * 0.22);
+
+    const gr = grassA.r + (grassB.r - grassA.r) * patch;
+    const gg = grassA.g + (grassB.g - grassA.g) * patch;
+    const gb = grassA.b + (grassB.b - grassA.b) * patch;
+    const rr = rockA.r + (rockB.r - rockA.r) * rockShade;
+    const rg = rockA.g + (rockB.g - rockA.g) * rockShade;
+    const rb = rockA.b + (rockB.b - rockA.b) * rockShade;
+
+    colors[i * 3] = (gr + (rr - gr) * rockiness) * shade;
+    colors[i * 3 + 1] = (gg + (rg - gg) * rockiness) * shade;
+    colors[i * 3 + 2] = (gb + (rb - gb) * rockiness) * shade;
+  }
+  position.needsUpdate = true;
+  geometry.setAttribute("color", new Float32BufferAttribute(colors, 3));
+  geometry.computeVertexNormals();
+  return geometry;
+}
+
+function Terrain({ map }: { map: ShooterMap }) {
+  const geometry = useMemo(() => buildTerrain(map), [map]);
+  useEffect(() => () => geometry.dispose(), [geometry]);
+  // Blanco por vertice: el color viene entero del atributo.
+  const material = getMaterial("--sn-text", { kind: "lambert", vertexColors: true });
+  return <mesh geometry={geometry} material={material} dispose={null} />;
 }
 
 /* ------------------------------------------------------------------ */
@@ -94,47 +181,31 @@ export function ShooterScene(props: ShooterSceneProps) {
 
 function Arena({ map }: { map: ShooterMap }) {
   const half = MAP_SIZE / 2;
+  const rock = getMaterial("--sn-rock-400", { kind: "lambert", vertexColors: true });
+  const wall = getMaterial("--sn-rock-600", { kind: "lambert", vertexColors: true });
 
-  const floor = useMemo(() => new PlaneGeometry(MAP_SIZE, MAP_SIZE), []);
-  useEffect(() => () => floor.dispose(), [floor]);
-  const gridMaterial = getGridFloorMaterial("--sn-bg-elev", "--sn-violet-500", {
-    cell: 4,
-    width: 0.05,
-    glow: 0.42,
-  });
-
-  const shaded = getMaterial("--sn-violet-600", { kind: "lambert", vertexColors: true });
-  const rampMaterial = getMaterial("--sn-violet-500", { kind: "lambert" });
-  const tower = getMaterial("--sn-panel-hi", { kind: "lambert", vertexColors: true });
-  const cyanGlow = getMaterial("--sn-cyan-400", { kind: "basic" });
-  const magentaGlow = getMaterial("--sn-magenta-400", { kind: "basic" });
-
-  const blocks = useMemo<InstanceWriter>(
-    () => createInstanceWriter(getGeometry("boxShaded"), shaded, 48),
-    [shaded],
+  const rocks = useMemo<InstanceWriter>(
+    () => createInstanceWriter(getGeometry("boxShaded"), rock, 96),
+    [rock],
   );
   const walls = useMemo<InstanceWriter>(
-    () => createInstanceWriter(getGeometry("boxShaded"), shaded, 4),
-    [shaded],
-  );
-  const strips = useMemo<InstanceWriter>(
-    () => createInstanceWriter(getGeometry("box"), cyanGlow, 8),
-    [cyanGlow],
+    () => createInstanceWriter(getGeometry("boxShaded"), wall, 4),
+    [wall],
   );
   useEffect(
     () => () => {
-      blocks.dispose();
+      rocks.dispose();
       walls.dispose();
-      strips.dispose();
     },
-    [blocks, walls, strips],
+    [rocks, walls],
   );
 
   useEffect(() => {
-    // Cobertura y plataformas en un solo escritor: son la misma familia.
-    fillStatic(blocks, [...map.cover, ...map.platforms], (box, writer) => {
+    fillStatic(rocks, map.cover, (box, writer) => {
       writer.push(box.x, box.y, box.z, box.w, box.h, box.d);
     });
+    // Un murete bajo de roca en el borde: del mapa no se sale, y se ve donde
+    // termina sin una pared de neon.
     fillStatic(
       walls,
       [
@@ -143,65 +214,16 @@ function Arena({ map }: { map: ShooterMap }) {
         { x: -half, z: 0, w: 1, d: MAP_SIZE + 1 },
         { x: half, z: 0, w: 1, d: MAP_SIZE + 1 },
       ],
-      (wall, writer) => {
-        writer.push(wall.x, WALL_HEIGHT / 2, wall.z, wall.w, WALL_HEIGHT, wall.d);
+      (segment, writer) => {
+        writer.push(segment.x, WALL_HEIGHT / 2, segment.z, segment.w, WALL_HEIGHT + 2, segment.d);
       },
     );
-    // Una linea de luz en el borde alto de cada pared y cuatro en el hito:
-    // es lo que se lee de lejos entre la niebla, mucho antes que la pared.
-    const l = map.landmark;
-    fillStatic(
-      strips,
-      [
-        { x: 0, y: WALL_HEIGHT, z: -half, w: MAP_SIZE + 1, h: 0.14, d: 0.3 },
-        { x: 0, y: WALL_HEIGHT, z: half, w: MAP_SIZE + 1, h: 0.14, d: 0.3 },
-        { x: -half, y: WALL_HEIGHT, z: 0, w: 0.3, h: 0.14, d: MAP_SIZE + 1 },
-        { x: half, y: WALL_HEIGHT, z: 0, w: 0.3, h: 0.14, d: MAP_SIZE + 1 },
-        { x: l.x + l.w / 2, y: l.y, z: l.z + l.d / 2, w: 0.18, h: l.h, d: 0.18 },
-        { x: l.x - l.w / 2, y: l.y, z: l.z + l.d / 2, w: 0.18, h: l.h, d: 0.18 },
-        { x: l.x + l.w / 2, y: l.y, z: l.z - l.d / 2, w: 0.18, h: l.h, d: 0.18 },
-        { x: l.x - l.w / 2, y: l.y, z: l.z - l.d / 2, w: 0.18, h: l.h, d: 0.18 },
-      ],
-      (strip, writer) => {
-        writer.push(strip.x, strip.y, strip.z, strip.w, strip.h, strip.d);
-      },
-    );
-  }, [blocks, walls, strips, map, half]);
+  }, [rocks, walls, map, half]);
 
   return (
     <>
-      <mesh rotation={[-Math.PI / 2, 0, 0]} geometry={floor} material={gridMaterial} dispose={null} />
-      <primitive object={blocks.mesh} />
+      <primitive object={rocks.mesh} />
       <primitive object={walls.mesh} />
-      <primitive object={strips.mesh} />
-
-      {map.ramps.map((ramp, index) => (
-        <mesh
-          key={`ramp-${index}`}
-          position={[ramp.x, ramp.y, ramp.z]}
-          rotation={[0, -ramp.yaw, 0]}
-          material={rampMaterial}
-          geometry={getGeometry("ramp")}
-          scale={[ramp.w, ramp.h, ramp.d]}
-          dispose={null}
-        />
-      ))}
-
-      {/* El hito: torre oscura con aristas de luz y una corona que gira. */}
-      <mesh
-        position={[map.landmark.x, map.landmark.y, map.landmark.z]}
-        material={tower}
-        geometry={getGeometry("boxShaded")}
-        scale={[map.landmark.w, map.landmark.h, map.landmark.d]}
-        dispose={null}
-      />
-      <mesh
-        position={[map.landmark.x, map.landmark.h + 0.6, map.landmark.z]}
-        material={magentaGlow}
-        geometry={getGeometry("box")}
-        scale={[map.landmark.w + 1.2, 0.25, map.landmark.d + 1.2]}
-        dispose={null}
-      />
     </>
   );
 }
@@ -211,6 +233,25 @@ function Arena({ map }: { map: ShooterMap }) {
 /* ------------------------------------------------------------------ */
 
 const Z_AXIS = new Vector3(0, 0, 1);
+
+type Writers = Record<
+  | "bodies"
+  | "heads"
+  | "visors"
+  | "guns"
+  | "shadows"
+  | "flashes"
+  | "beacons"
+  | "tracers"
+  | "sparks"
+  | "carBodies"
+  | "carCabins"
+  | "wheels"
+  | "chestBases"
+  | "chestLids"
+  | "halos",
+  InstanceWriter
+>;
 
 function Runtime({ view, enabled, tick, sampleState }: ShooterSceneProps) {
   const camera = useThree((state) => state.camera) as PerspectiveCamera;
@@ -226,9 +267,11 @@ function Runtime({ view, enabled, tick, sampleState }: ShooterSceneProps) {
 
   /* Materiales y escritores. Se crean una vez y se reusan por cuadro. */
   const tinted = getMaterial("--sn-text", { kind: "lambert" });
+  const tintedShaded = getMaterial("--sn-text", { kind: "lambert", vertexColors: true });
   const visorMaterial = getMaterial("--sn-cyan-300", { kind: "basic" });
   const gunMaterial = getMaterial("--sn-panel-hi", { kind: "lambert" });
-  const shadowMaterial = getMaterial("--sn-bg", { kind: "basic", opacity: 0.55 });
+  const shadowMaterial = getMaterial("--sn-bg", { kind: "basic", opacity: 0.45 });
+  const wheelMaterial = getMaterial("--sn-panel", { kind: "lambert" });
 
   const additive = useMemo(
     () =>
@@ -241,7 +284,7 @@ function Runtime({ view, enabled, tick, sampleState }: ShooterSceneProps) {
       }),
     [],
   );
-  const beaconMaterial = useMemo(
+  const glow = useMemo(
     () =>
       new MeshBasicMaterial({
         color: getColor("--sn-text"),
@@ -261,28 +304,32 @@ function Runtime({ view, enabled, tick, sampleState }: ShooterSceneProps) {
   useEffect(
     () => () => {
       additive.dispose();
-      beaconMaterial.dispose();
+      glow.dispose();
       ringGeometry.dispose();
       skyGeometry.dispose();
     },
-    [additive, beaconMaterial, ringGeometry, skyGeometry],
+    [additive, glow, ringGeometry, skyGeometry],
   );
 
-  const writers = useMemo(
+  const writers = useMemo<Writers>(
     () => ({
       bodies: createInstanceWriter(getGeometry("capsule"), tinted, MAX_PLAYERS, { colors: true }),
       heads: createInstanceWriter(getGeometry("sphere"), tinted, MAX_PLAYERS, { colors: true }),
       visors: createInstanceWriter(getGeometry("box"), visorMaterial, MAX_PLAYERS),
       guns: createInstanceWriter(getGeometry("box"), gunMaterial, MAX_PLAYERS),
-      shadows: createInstanceWriter(getGeometry("disc"), shadowMaterial, MAX_PLAYERS),
+      shadows: createInstanceWriter(getGeometry("disc"), shadowMaterial, MAX_PLAYERS + MAX_CARS),
       flashes: createInstanceWriter(getGeometry("sphere"), additive, MAX_PLAYERS, { colors: true }),
-      beacons: createInstanceWriter(getGeometry("cylinder"), beaconMaterial, MAX_PLAYERS, {
-        colors: true,
-      }),
+      beacons: createInstanceWriter(getGeometry("cylinder"), glow, MAX_PLAYERS, { colors: true }),
       tracers: createInstanceWriter(getGeometry("box"), additive, TRACER_MAX, { colors: true }),
       sparks: createInstanceWriter(getGeometry("box"), additive, SPARK_MAX, { colors: true }),
+      carBodies: createInstanceWriter(getGeometry("boxShaded"), tintedShaded, MAX_CARS, { colors: true }),
+      carCabins: createInstanceWriter(getGeometry("boxShaded"), tintedShaded, MAX_CARS, { colors: true }),
+      wheels: createInstanceWriter(getGeometry("cylinder"), wheelMaterial, MAX_CARS * 4),
+      chestBases: createInstanceWriter(getGeometry("boxShaded"), tintedShaded, MAX_CHESTS, { colors: true }),
+      chestLids: createInstanceWriter(getGeometry("boxShaded"), tintedShaded, MAX_CHESTS, { colors: true }),
+      halos: createInstanceWriter(getGeometry("disc"), glow, MAX_CHESTS, { colors: true }),
     }),
-    [tinted, visorMaterial, gunMaterial, shadowMaterial, additive, beaconMaterial],
+    [tinted, tintedShaded, visorMaterial, gunMaterial, shadowMaterial, wheelMaterial, additive, glow],
   );
   useEffect(
     () => () => {
@@ -302,11 +349,23 @@ function Runtime({ view, enabled, tick, sampleState }: ShooterSceneProps) {
     });
     return out;
   }, []);
-  const warm = useMemo(() => getColor("--sn-warn"), []);
+  const palette = useMemo(
+    () => ({
+      warm: getColor("--sn-warn"),
+      water: getColor("--sn-water-400"),
+      carPaint: getColor("--sn-rock-400"),
+      carFree: getColor("--sn-text-dim"),
+      // Un color por arma de cofre: se sabe que da antes de abrirlo.
+      chestCommon: getColor("--sn-cyan-400"),
+      chestUncommon: getColor("--sn-violet-300"),
+      chestRare: getColor("--sn-warn"),
+      chestOpened: getColor("--sn-text-dim"),
+    }),
+    [],
+  );
 
   const skyRef = useRef<Mesh>(null);
   const ringRef = useRef<Mesh>(null);
-  const crownRef = useRef<Mesh>(null);
   const viewmodelRef = useRef<Group>(null);
   const gunRef = useRef<Group>(null);
   const muzzleRef = useRef<Mesh>(null);
@@ -335,8 +394,10 @@ function Runtime({ view, enabled, tick, sampleState }: ShooterSceneProps) {
     frameView(view, dt, sampleRef.current());
     tickShaders(view.elapsed);
 
-    const fpv = (!view.isHost || view.hostPlaying) && !view.spectating && view.state !== 3;
-    driveCamera(view, camera, scratch, fpv, dt);
+    const local = !view.isHost || view.hostPlaying;
+    const driving = local && view.ownDriving >= 0 && !view.spectating && view.state !== 3;
+    const fpv = local && !driving && !view.spectating && view.state !== 3;
+    driveCamera(view, camera, scratch, fpv, driving, dt);
 
     const sky = skyRef.current;
     if (sky) sky.position.copy(camera.position);
@@ -344,58 +405,36 @@ function Runtime({ view, enabled, tick, sampleState }: ShooterSceneProps) {
     const ring = ringRef.current;
     if (ring) {
       ring.visible = view.state >= 1 && view.ringRadius > 0.5;
-      ring.position.set(view.ringX, 0, view.ringZ);
+      ring.position.set(view.ringX, -2, view.ringZ);
       ring.scale.set(view.ringRadius, RING_HEIGHT, view.ringRadius);
     }
-    const crown = crownRef.current;
-    if (crown && !view.reducedMotion) crown.rotation.y = view.elapsed * 0.35;
 
-    writePlayers(view, writers, seatRgb, warm, fpv, scratch.dir);
-    writeEffects(view, writers, seatRgb, warm, scratch);
+    writePlayers(view, writers, seatRgb, palette, fpv, scratch.dir);
+    writeCars(view, writers, seatRgb, palette);
+    writeChests(view, writers, palette);
+    writeEffects(view, writers, seatRgb, palette, scratch);
     driveViewmodel(view, viewmodelRef.current, gunRef.current, muzzleRef.current, camera, fpv);
   });
-
-  const landmark = view.map.landmark;
 
   return (
     <>
       <mesh
         ref={skyRef}
         geometry={skyGeometry}
-        material={getSkyMaterial("--sn-bg", "--sn-violet-500", "--sn-bg")}
+        material={getSkyMaterial("--sn-sunset-top", "--sn-sunset-horizon", "--sn-sunset-low")}
         dispose={null}
       />
       <mesh ref={ringRef} geometry={ringGeometry} material={getRingMaterial("--sn-magenta-400")} dispose={null} />
-      <mesh
-        ref={crownRef}
-        position={[landmark.x, landmark.h + 2.2, landmark.z]}
-        geometry={getGeometry("box")}
-        material={getMaterial("--sn-cyan-400", { kind: "basic" })}
-        scale={[landmark.w + 3, 0.16, landmark.d + 3]}
-        dispose={null}
-      />
 
-      <primitive object={writers.shadows.mesh} />
-      <primitive object={writers.bodies.mesh} />
-      <primitive object={writers.heads.mesh} />
-      <primitive object={writers.visors.mesh} />
-      <primitive object={writers.guns.mesh} />
-      <primitive object={writers.beacons.mesh} />
-      <primitive object={writers.tracers.mesh} />
-      <primitive object={writers.sparks.mesh} />
-      <primitive object={writers.flashes.mesh} />
+      {Object.values(writers).map((writer, index) => (
+        <primitive key={index} object={writer.mesh} />
+      ))}
 
       {/*
         El arma en primera persona. Cuelga de un grupo que se pega a la camara
         por cuadro; no es hijo de la camara porque R3F no la monta en el arbol.
-        Tres cajas y una esfera: se lee como un rifle y son cuatro draw calls.
       */}
       <group ref={viewmodelRef} visible={false}>
-        {/*
-          Chico y abajo a la derecha, apenas girado hacia la mira: a 0,6 de
-          la camara cualquier caja se ve enorme, y un arma que tapa un cuarto
-          de la pantalla es un arma que estorba.
-        */}
         <group ref={gunRef} position={[0.36, -0.32, -0.7]} rotation={[0, -0.1, 0]}>
           <mesh
             geometry={getGeometry("boxShaded")}
@@ -413,7 +452,7 @@ function Runtime({ view, enabled, tick, sampleState }: ShooterSceneProps) {
           <mesh
             position={[0, 0.05, -0.08]}
             geometry={getGeometry("box")}
-            material={getMaterial("--sn-cyan-400", { kind: "basic" })}
+            material={getMaterial("--sn-water-400", { kind: "basic" })}
             scale={[0.012, 0.008, 0.26]}
             dispose={null}
           />
@@ -431,11 +470,6 @@ function Runtime({ view, enabled, tick, sampleState }: ShooterSceneProps) {
   );
 }
 
-type Writers = Record<
-  "bodies" | "heads" | "visors" | "guns" | "shadows" | "flashes" | "beacons" | "tracers" | "sparks",
-  InstanceWriter
->;
-
 type CameraScratch = {
   dir: Float32Array;
   v: Vector3;
@@ -447,28 +481,39 @@ type CameraScratch = {
   settled: boolean;
 };
 
+type Palette = {
+  warm: { r: number; g: number; b: number };
+  water: { r: number; g: number; b: number };
+  carPaint: { r: number; g: number; b: number };
+  carFree: { r: number; g: number; b: number };
+  chestCommon: { r: number; g: number; b: number };
+  chestUncommon: { r: number; g: number; b: number };
+  chestRare: { r: number; g: number; b: number };
+  chestOpened: { r: number; g: number; b: number };
+};
+
 /**
  * La camara.
  *
- * En el celular, primera persona en los ojos del cuerpo predicho, con un
- * balanceo minimo al caminar y una sacudida corta al recibir dano. En el
- * proyector —y en el celular de un eliminado— una orbita lenta alrededor
- * del centro de la accion, que se abre o se cierra segun cuan repartidos
- * esten los vivos. Con movimiento reducido no hay balanceo, ni sacudida, ni
- * orbita: la camara aerea queda fija.
+ * En primera persona, en los ojos del cuerpo predicho, con un balanceo
+ * minimo al caminar y una sacudida corta al recibir dano. Manejando, en
+ * tercera persona detras del auto. En el proyector —y en el celular de un
+ * eliminado— una orbita lenta alrededor del centro de la accion. Con
+ * movimiento reducido no hay balanceo, ni sacudida, ni orbita.
  */
 function driveCamera(
   view: ShooterView,
   camera: PerspectiveCamera,
   scratch: CameraScratch,
   fpv: boolean,
+  driving: boolean,
   dt: number,
 ): void {
-  const mode = fpv ? "fpv" : "spectator";
+  const mode = fpv ? "fpv" : driving ? "drive" : "spectator";
   if (mode !== scratch.mode) {
     scratch.mode = mode;
     scratch.settled = false;
-    camera.fov = fpv ? FOV_FPV : FOV_SPECTATOR;
+    camera.fov = fpv ? FOV_FPV : driving ? FOV_DRIVE : FOV_SPECTATOR;
     camera.updateProjectionMatrix();
   }
 
@@ -484,6 +529,33 @@ function driveCamera(
       body.z,
     );
     camera.rotation.set(view.camPitch + (calm ? 0 : view.recoil * 0.03), view.camYaw, 0);
+    return;
+  }
+
+  if (driving) {
+    const car = view.ownDriving;
+    const cx = view.carX[car] ?? 0;
+    const cy = view.carY[car] ?? 0;
+    const cz = view.carZ[car] ?? 0;
+    const yaw = view.carYaw[car] ?? 0;
+    const fx = -Math.sin(yaw);
+    const fz = -Math.cos(yaw);
+    scratch.camTarget.set(cx - fx * 7.5, cy + 3.4, cz - fz * 7.5);
+    scratch.v.set(cx + fx * 2, cy + 1.2, cz + fz * 2);
+    if (!scratch.settled || view.reducedMotion) {
+      scratch.camPos.copy(scratch.camTarget);
+      scratch.lookAt.copy(scratch.v);
+      scratch.settled = true;
+    } else {
+      const k = 1 - Math.exp(-dt * 6);
+      scratch.camPos.lerp(scratch.camTarget, k);
+      scratch.lookAt.lerp(scratch.v, k);
+    }
+    // La camara no se mete bajo el terreno en una bajada.
+    const floor = terrainHeight(view.map, scratch.camPos.x, scratch.camPos.z) + 1.2;
+    if (scratch.camPos.y < floor) scratch.camPos.y = floor;
+    camera.position.copy(scratch.camPos);
+    camera.lookAt(scratch.lookAt);
     return;
   }
 
@@ -510,10 +582,11 @@ function driveCamera(
     const d = Math.hypot((view.x[seat] ?? 0) - cx, (view.z[seat] ?? 0) - cz);
     if (d > spread) spread = d;
   }
-  const radius = Math.min(54, Math.max(18, spread * 1.25 + 14));
-  const angle = view.reducedMotion ? 0.8 : 0.8 + view.elapsed * 0.09;
-  scratch.camTarget.set(cx + Math.cos(angle) * radius, 9 + radius * 0.72, cz + Math.sin(angle) * radius);
-  scratch.v.set(cx, 1.2, cz);
+  const radius = Math.min(130, Math.max(24, spread * 1.25 + 18));
+  const angle = view.reducedMotion ? 0.8 : 0.8 + view.elapsed * 0.07;
+  const groundAt = terrainHeight(view.map, cx, cz);
+  scratch.camTarget.set(cx + Math.cos(angle) * radius, groundAt + 14 + radius * 0.72, cz + Math.sin(angle) * radius);
+  scratch.v.set(cx, groundAt + 1.2, cz);
 
   if (!scratch.settled) {
     scratch.camPos.copy(scratch.camTarget);
@@ -541,12 +614,13 @@ function writeAim(yaw: number, pitch: number, out: Float32Array): void {
 }
 
 const aimScratch = new Float32Array(4);
+const SQRT_HALF = Math.SQRT1_2;
 
 function writePlayers(
   view: ShooterView,
   writers: Writers,
   seatRgb: Float32Array,
-  warm: { r: number; g: number; b: number },
+  palette: Palette,
   fpv: boolean,
   dir: Float32Array,
 ): void {
@@ -562,6 +636,9 @@ function writePlayers(
   for (let seat = 0; seat < MAX_PLAYERS; seat++) {
     if (view.active[seat] !== 1 || view.alive[seat] !== 1) continue;
     const self = fpv && seat === view.seat;
+    // Adentro del auto no se dibuja el cuerpo: la cabina lleva su color.
+    const inCar = (view.driving[seat] ?? -1) >= 0;
+    if (inCar) continue;
     const x = view.x[seat] ?? 0;
     const y = view.y[seat] ?? 0;
     const z = view.z[seat] ?? 0;
@@ -576,7 +653,6 @@ function writePlayers(
     const rx = Math.cos(yaw);
     const rz = -Math.sin(yaw);
 
-    // El arma: a la derecha del cuerpo, apuntando adonde mira.
     const gx = x + rx * 0.3 + fx * 0.32;
     const gy = y + 1.24;
     const gz = z + rz * 0.3 + fz * 0.32;
@@ -588,6 +664,9 @@ function writePlayers(
       heads.tint(r, g, b);
       visors.pushYaw(x + fx * 0.17, y + 1.6, z + fz * 0.17, yaw, 0.3, 0.09, 0.1);
       writeAim(yaw, pitch, aimScratch);
+      // Un canion mas grande cuando el arma es de cofre: se ve que trae algo.
+      const kind = view.weapon[seat] ?? 0;
+      const gunLength = kind === WEAPON_CANON ? 1.1 : kind === WEAPON_MANGUERA ? 0.95 : 0.8;
       guns.pushQuat(
         gx,
         gy,
@@ -598,11 +677,11 @@ function writePlayers(
         aimScratch[3] ?? 1,
         0.11,
         0.13,
-        0.8,
+        gunLength,
       );
       const ground = groundHeight(view.map, x, z, y);
       const lift = y - ground;
-      shadows.push(x, ground + 0.02, z, Math.max(0.35, 0.95 - lift * 0.12));
+      shadows.push(x, ground + 0.03, z, Math.max(0.35, 0.95 - lift * 0.12));
     }
 
     const flash = view.flashes[seat] ?? 0;
@@ -614,15 +693,21 @@ function writePlayers(
         gz + (dir[2] ?? 0) * 0.5,
         0.55 * flash + 0.1,
       );
-      flashes.tint(warm.r, warm.g, warm.b);
+      flashes.tint(palette.water.r, palette.water.g, palette.water.b);
     }
 
-    // Durante el despliegue, una columna de luz sobre cada uno: en el
-    // proyector se ve donde cayo cada quien; en el celular, donde estan los demas.
+    // Durante el despliegue, una columna de luz sobre cada uno.
     if (view.state === 1) {
       beacons.push(x, y + 7, z, 1.4, 14, 1.4);
       beacons.tint(r, g, b);
     }
+  }
+
+  // Las sombras de los autos van en el mismo escritor: misma familia.
+  for (let car = 0; car < view.carCount; car++) {
+    const x = view.carX[car] ?? 0;
+    const z = view.carZ[car] ?? 0;
+    shadows.push(x, (view.carY[car] ?? 0) + 0.04, z, 3.2);
   }
 
   bodies.end();
@@ -634,11 +719,117 @@ function writePlayers(
   beacons.end();
 }
 
+/**
+ * Los autos: carroceria, cabina y cuatro ruedas, tres draw calls para todos.
+ * La cabina lleva el color de quien maneja: desde lejos se sabe quien va.
+ */
+function writeCars(view: ShooterView, writers: Writers, seatRgb: Float32Array, palette: Palette): void {
+  const { carBodies, carCabins, wheels } = writers;
+  carBodies.begin();
+  carCabins.begin();
+  wheels.begin();
+  for (let car = 0; car < view.carCount; car++) {
+    const x = view.carX[car] ?? 0;
+    const y = view.carY[car] ?? 0;
+    const z = view.carZ[car] ?? 0;
+    const yaw = view.carYaw[car] ?? 0;
+    const fx = -Math.sin(yaw);
+    const fz = -Math.cos(yaw);
+    const rx = Math.cos(yaw);
+    const rz = -Math.sin(yaw);
+    const driver = view.carDriver[car] ?? -1;
+
+    carBodies.pushYaw(x, y + 0.62, z, yaw, 2.2, 0.7, 4.2);
+    carBodies.tint(palette.carPaint.r, palette.carPaint.g, palette.carPaint.b);
+    carCabins.pushYaw(x - fx * 0.3, y + 1.22, z - fz * 0.3, yaw, 1.7, 0.62, 2);
+    if (driver >= 0) {
+      carCabins.tint(seatRgb[driver * 3] ?? 1, seatRgb[driver * 3 + 1] ?? 1, seatRgb[driver * 3 + 2] ?? 1);
+    } else {
+      carCabins.tint(palette.carFree.r, palette.carFree.g, palette.carFree.b);
+    }
+
+    // Ruedas: el cilindro nace parado; se lo acuesta 90 grados en Z y se lo
+    // gira con el auto. q = q_yaw * q_z90, sin asignar.
+    const ay = Math.sin(yaw / 2);
+    const aw = Math.cos(yaw / 2);
+    const qx = ay * SQRT_HALF;
+    const qy = ay * SQRT_HALF;
+    const qz = aw * SQRT_HALF;
+    const qw = aw * SQRT_HALF;
+    for (let i = 0; i < 4; i++) {
+      const side = i % 2 === 0 ? 1 : -1;
+      const front = i < 2 ? 1 : -1;
+      const wx = x + rx * side * 1.05 + fx * front * 1.4;
+      const wz = z + rz * side * 1.05 + fz * front * 1.4;
+      wheels.pushQuat(wx, y + 0.42, wz, qx, qy, qz, qw, 0.84, 0.36, 0.84);
+    }
+  }
+  carBodies.end();
+  carCabins.end();
+  wheels.end();
+}
+
+/**
+ * Los cofres: base y tapa instanciadas, con el color del arma que traen, y un
+ * halo en el piso mientras esten cerrados. La tapa se levanta al abrirse.
+ */
+function writeChests(view: ShooterView, writers: Writers, palette: Palette): void {
+  const { chestBases, chestLids, halos } = writers;
+  chestBases.begin();
+  chestLids.begin();
+  halos.begin();
+  const chests = view.map.chests;
+  const pulse = 0.85 + 0.15 * Math.sin(view.elapsed * 2.4);
+  for (let i = 0; i < chests.length && i < MAX_CHESTS; i++) {
+    const chest = chests[i];
+    if (!chest) continue;
+    const opened = (view.chestOpened & (1 << i)) !== 0;
+    const color = opened
+      ? palette.chestOpened
+      : chest.weapon === WEAPON_CANON
+        ? palette.chestRare
+        : chest.weapon === WEAPON_MANGUERA
+          ? palette.chestUncommon
+          : palette.chestCommon;
+
+    chestBases.push(chest.x, chest.y + 0.45, chest.z, 1.4, 0.9, 1);
+    chestBases.tint(color.r, color.g, color.b);
+
+    // Bisagra atras (z + 0.5): la tapa gira sobre X y se para al abrirse.
+    const angle = opened ? -1.4 : 0;
+    const cos = Math.cos(angle);
+    const sin = Math.sin(angle);
+    const ly = 0.125 * cos - 0.5 * sin;
+    const lz = 0.125 * sin + 0.5 * cos;
+    chestLids.pushQuat(
+      chest.x,
+      chest.y + 0.9 + ly,
+      chest.z + 0.5 - lz,
+      Math.sin(angle / 2),
+      0,
+      0,
+      Math.cos(angle / 2),
+      1.4,
+      0.25,
+      1,
+    );
+    chestLids.tint(color.r, color.g, color.b);
+
+    if (!opened) {
+      halos.push(chest.x, chest.y + 0.05, chest.z, 3.6 * pulse);
+      halos.tint(color.r, color.g, color.b);
+    }
+  }
+  chestBases.end();
+  chestLids.end();
+  halos.end();
+}
+
 function writeEffects(
   view: ShooterView,
   writers: Writers,
   seatRgb: Float32Array,
-  warm: { r: number; g: number; b: number },
+  palette: Palette,
   scratch: CameraScratch,
 ): void {
   const { tracers, sparks } = writers;
@@ -658,7 +849,7 @@ function writeEffects(
     if (length < 0.01) continue;
     scratch.v.set(dx / length, dy / length, dz / length);
     scratch.q.setFromUnitVectors(Z_AXIS, scratch.v);
-    const thickness = 0.02 + 0.06 * age;
+    const thickness = 0.03 + 0.08 * age;
     tracers.pushQuat(
       x0 + dx / 2,
       y0 + dy / 2,
@@ -671,8 +862,13 @@ function writeEffects(
       thickness,
       length,
     );
+    // Agua del color de quien tira, apenas: se sabe de donde vino el chorro.
     const seat = Math.max(0, Math.min(MAX_PLAYERS - 1, Math.round(t[base + 7] ?? 0)));
-    tracers.tint(seatRgb[seat * 3] ?? 1, seatRgb[seat * 3 + 1] ?? 1, seatRgb[seat * 3 + 2] ?? 1);
+    tracers.tint(
+      (palette.water.r + (seatRgb[seat * 3] ?? 1)) * 0.5,
+      (palette.water.g + (seatRgb[seat * 3 + 1] ?? 1)) * 0.5,
+      (palette.water.b + (seatRgb[seat * 3 + 2] ?? 1)) * 0.5,
+    );
   }
   tracers.end();
 
@@ -682,8 +878,8 @@ function writeEffects(
     const base = i * SPARK_STRIDE;
     const age = s[base + 6] ?? 0;
     if (age <= 0) continue;
-    sparks.push(s[base] ?? 0, s[base + 1] ?? 0, s[base + 2] ?? 0, 0.05 + 0.14 * age);
-    sparks.tint(warm.r, warm.g, warm.b);
+    sparks.push(s[base] ?? 0, s[base + 1] ?? 0, s[base + 2] ?? 0, 0.05 + 0.16 * age);
+    sparks.tint(palette.water.r, palette.water.g, palette.water.b);
   }
   sparks.end();
 }
@@ -714,10 +910,12 @@ function driveViewmodel(
     const kick = calm ? 0 : view.recoil;
     gun.position.set(0.36 + bobX, -0.32 + bobY + kick * 0.015, -0.7 + kick * 0.07);
     gun.rotation.set(kick * 0.1, -0.1, 0);
+    // El arma de cofre se ve mas larga en la mano.
+    const kind = view.ownWeapon;
+    const stretch = kind === WEAPON_CANON ? 1.35 : kind === WEAPON_MANGUERA ? 1.15 : 1;
+    gun.scale.set(1, 1, stretch);
     if (view.reloadLeft > 0) {
-      // Recargando: el arma baja y se ladea. Es la unica animacion que hace
-      // falta para que la recarga se entienda sin leer el HUD.
-      const progress = 1 - view.reloadLeft / Math.max(0.01, view.rules.reloadS);
+      const progress = 1 - view.reloadLeft / Math.max(0.01, view.ownSpec.reloadS);
       const dip = Math.sin(progress * Math.PI) * 0.16;
       gun.position.y -= dip;
       gun.rotation.z = dip * 2.2;

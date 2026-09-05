@@ -24,6 +24,9 @@ import {
   type ShooterInput,
 } from "./logic";
 import {
+  HINT_CHEST,
+  HINT_EXIT_CAR,
+  HINT_NONE,
   OVER_HOLD_S,
   SEAT_TOKENS,
   VIEW_DELAY_MS,
@@ -71,6 +74,11 @@ type HudState = {
   hp: number;
   ammo: number;
   magazine: number;
+  /** Nombre corto del arma en mano. */
+  weapon: string;
+  /** Que puede hacer el boton de interactuar ahora (`HINT_*` de view.ts). */
+  interactHint: number;
+  driving: boolean;
   /** 0 = no recarga; si no, progreso 0..1. */
   reloading: number;
   alive: number;
@@ -114,8 +122,11 @@ function readHud(view: ShooterView, connected: number): HudState {
     state: view.state,
     hp: Math.round(view.ownHp),
     ammo: view.ammo,
-    magazine: view.rules.magazine,
-    reloading: view.reloadLeft > 0 ? 1 - view.reloadLeft / Math.max(0.01, view.rules.reloadS) : 0,
+    magazine: view.ownSpec.magazine,
+    weapon: view.ownSpec.name,
+    interactHint: view.interactHint,
+    driving: view.ownDriving >= 0,
+    reloading: view.reloadLeft > 0 ? 1 - view.reloadLeft / Math.max(0.01, view.ownSpec.reloadS) : 0,
     alive: view.aliveCount,
     timeS: view.timeS,
     deployLeft: view.deployLeft,
@@ -377,6 +388,22 @@ export default function ShooterGame({ config, signal, onFinish, onReady }: GameP
 
   const fpv = !isHost || hostPlaying;
 
+  // Interactuar: E en la PC, el boton contextual en el celular. Es un flanco
+  // que la vista consume en el proximo paso, en el rol que sea.
+  const interact = useCallback(() => {
+    view.interactQueued = true;
+  }, [view]);
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (event.code !== "KeyE" || event.repeat) return;
+      const target = event.target as HTMLElement | null;
+      if (target && /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName)) return;
+      interact();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [interact]);
+
   const ringLabel =
     hud.state < 2
       ? "—"
@@ -387,8 +414,8 @@ export default function ShooterGame({ config, signal, onFinish, onReady }: GameP
           : `${hud.ringIn}s`;
 
   const instructions = isHost
-    ? "El proyector muestra la arena y los celulares entran por el QR. Para jugar desde esta PC: «Jugar desde acá» o tecla Tab, WASD para moverse, mouse para apuntar y disparar, espacio para saltar."
-    : "Stick izquierdo: moverse. Arrastrá a la derecha: mirar. Disparar y saltar con los botones. Quedate dentro del anillo.";
+    ? "El proyector muestra el valle y los celulares entran por el QR. Para jugar desde esta PC: «Jugar desde acá» o tecla Tab, WASD para moverse, mouse para apuntar y disparar, espacio para saltar, E para abrir cofres y subir al auto."
+    : "Stick izquierdo: moverse. Arrastrá a la derecha: mirar. Disparar y saltar con los botones. Acercate a un cofre o a un auto y tocá el botón. Quedate dentro del anillo.";
 
   return (
     <Stage
@@ -402,7 +429,7 @@ export default function ShooterGame({ config, signal, onFinish, onReady }: GameP
       onPause={life.pause}
       onRestart={life.restart}
       aspect={16 / 9}
-      camera={{ position: [0, 32, 44], fov: 58, near: 0.1, far: 260 }}
+      camera={{ position: [0, 60, 90], fov: 58, near: 0.1, far: 460 }}
       lights={false}
       background="var(--sn-bg)"
       {...(config.debug ? { debug: true } : {})}
@@ -436,6 +463,7 @@ export default function ShooterGame({ config, signal, onFinish, onReady }: GameP
           isHost={isHost}
           hostPlaying={hostPlaying}
           onToggleHost={toggleHostPlaying}
+          onInteract={interact}
         />
       }
       summary={<Summary hud={hud} isHost={isHost} seat={seat} />}
@@ -469,6 +497,7 @@ function ShooterOverlay({
   isHost,
   hostPlaying,
   onToggleHost,
+  onInteract,
 }: {
   hud: HudState;
   sticks: SticksState;
@@ -477,8 +506,15 @@ function ShooterOverlay({
   isHost: boolean;
   hostPlaying: boolean;
   onToggleHost: () => void;
+  onInteract: () => void;
 }) {
   const inPlay = fpv && !hud.spectating && hud.state >= 1 && hud.state < 3;
+  const interactLabel =
+    hud.interactHint === HINT_CHEST
+      ? "Abrir cofre · E"
+      : hud.interactHint === HINT_EXIT_CAR
+        ? "Bajar del auto · E"
+        : "Subir al auto · E";
   const hpTone = hud.hp > 60 ? "var(--sn-cyan-400)" : hud.hp > 30 ? "var(--sn-warn)" : "var(--sn-danger)";
 
   return (
@@ -585,6 +621,9 @@ function ShooterOverlay({
               </div>
             </div>
             <div className="flex flex-col items-start">
+              <span className="text-[10px] uppercase tracking-[0.18em] text-sn-muted">
+                {hud.driving ? "Al volante" : hud.weapon}
+              </span>
               <span className="sn-num text-2xl font-bold leading-none" style={{ color: hud.ammo === 0 ? "var(--sn-warn)" : "var(--sn-text)" }}>
                 {hud.reloading > 0 ? "…" : hud.ammo}
                 <span className="text-sm text-sn-muted"> / {hud.magazine}</span>
@@ -601,6 +640,24 @@ function ShooterOverlay({
             </div>
           </div>
         </>
+      )}
+
+      {/* Interactuar: un cofre cerrado o un auto al alcance. */}
+      {fpv && inPlay && hud.interactHint !== HINT_NONE && (
+        <button
+          type="button"
+          onClick={onInteract}
+          className="pointer-events-auto absolute bottom-24 left-1/2 -translate-x-1/2 rounded-full px-4 py-2 text-sm font-semibold"
+          style={{
+            background: "color-mix(in srgb, var(--sn-panel) 88%, transparent)",
+            color: "var(--sn-water-400)",
+            border: "1px solid var(--sn-water-400)",
+            animation: "sn-shooter-rise 0.25s ease-out",
+          }}
+          data-game-ui
+        >
+          {interactLabel}
+        </button>
       )}
 
       {/* Avisos centrales: despliegue, anillo, espera, resultado. */}

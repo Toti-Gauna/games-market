@@ -57,6 +57,16 @@
   --sn-danger: #ff4d6d;
   --sn-focus: var(--sn-cyan-400);
 
+  /* --- paisaje (Bubble Shooter Game: pasto, roca, atardecer, agua) --- */
+  --sn-grass-400: #5fae55;
+  --sn-grass-600: #2f6f3a;
+  --sn-rock-400: #8a8aa6;
+  --sn-rock-600: #4a4862;
+  --sn-sunset-top: #3a2a6e;
+  --sn-sunset-horizon: #ff9e5e;
+  --sn-sunset-low: #6b2f5a;
+  --sn-water-400: #6fd6ff;
+
   /* --- estados del catalogo --- */
   --sn-status-stable: var(--sn-success);
   --sn-status-beta: var(--sn-warn);

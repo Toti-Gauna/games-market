@@ -2,13 +2,15 @@ import type { PaletteToken } from "@/core/engine/palette";
 import { createRng, type Rng } from "@/core/engine/rng";
 import type { NetSnapshot } from "@/core/net/snapshot";
 import { createPrediction, type Prediction } from "@/core/net/prediction";
-import { MAX_PLAYERS, type ShooterMap } from "./map";
+import { MAX_CARS, MAX_PLAYERS, terrainHeight, type ShooterMap } from "./map";
 import {
   EYE_HEIGHT,
   FLAG_FIRED,
   HP_MAX,
+  INTERACT_RADIUS,
   S_ACTIVE,
   S_ALIVE,
+  S_CHESTS_OPENED,
   S_DEPLOY,
   S_LAST_HIT,
   S_LAST_KILL,
@@ -27,23 +29,30 @@ import {
   entityFired,
   entityHp,
   groundHeight,
+  isCarEntity,
   lookDirection,
   markHuman,
+  nearestClosedChest,
+  readCar,
   readEntity,
   ringDistance,
   setInput,
   simulateBody,
+  snapshotWeapon,
   stepWorld,
+  weaponSpec,
   writeSnapshot,
+  type CarBody,
   type MutableSnapshot,
   type PlayerBody,
   type ShooterInput,
   type ShooterRules,
   type ShooterWorld,
+  type WeaponSpec,
 } from "./logic";
 
 /**
- * X4 · Supernova Arena — el estado de la partida tal como se DIBUJA.
+ * X4 · Bubble Shooter Game — el estado de la partida tal como se DIBUJA.
  *
  * Es la pieza que junta las tres cosas que no pueden vivir en el mismo lugar:
  * la simulacion autoritativa (`logic.ts`, solo en el host), la red (que la
@@ -56,17 +65,17 @@ import {
  * Dos roles, un solo tipo:
  *
  * - **Host (el proyector).** Corre `stepWorld`, copia el mundo a los arrays
- *   de dibujo, cosecha los eventos del paso (tiros, impactos, muertes) como
- *   efectos, y publica un snapshot a 20 Hz. No juega: mira desde arriba.
+ *   de dibujo, cosecha los eventos del paso (tiros, impactos, muertes, cofres)
+ *   como efectos, y publica un snapshot a 20 Hz. Puede jugar el asiento 0.
  * - **Cliente (el celular).** Predice su propio cuerpo con el mismo
  *   `simulateBody` del host, manda su input con secuencia, y dibuja a los
- *   demas desde el estado interpolado ~100 ms atras que entrega `useGameNet`.
- *   Los escalares y los eventos los toma del estado crudo apenas llega, que
- *   es lo que hace que el indicador de dano apunte al atacante en el acto.
+ *   demas y a los autos desde el estado interpolado ~100 ms atras que entrega
+ *   `useGameNet`. Los escalares y los eventos los toma del estado crudo apenas
+ *   llega. Manejando no predice: el auto es del host y la camara lo sigue.
  *
- * Cero asignaciones por paso, salvo dos que se eligen a proposito: el cuerpo
- * predicho de cada paso (la prediccion exige una funcion pura) y una entrada
- * en el feed cuando alguien muere, que pasa diez veces por partida.
+ * Cero asignaciones por paso, salvo las que se eligen a proposito: el cuerpo
+ * predicho de cada paso (la prediccion exige una funcion pura), una entrada en
+ * el feed cuando alguien muere, y una especificacion de arma al cambiarla.
  */
 
 /** Un color por asiento, todos de la paleta. Se ve quien es quien de lejos. */
@@ -85,12 +94,18 @@ export const SEAT_TOKENS: readonly PaletteToken[] = [
 
 export const VIEW_DELAY_MS = 100;
 export const OVER_HOLD_S = 4.5;
-export const TRACER_MAX = 32;
+export const TRACER_MAX = 48;
 export const TRACER_STRIDE = 8; // x0 y0 z0 x1 y1 z1 edad asiento
-export const SPARK_MAX = 128;
+export const SPARK_MAX = 160;
 export const SPARK_STRIDE = 7; // x y z vx vy vz edad
 export const FEED_MAX = 4;
 export const FEED_LIFE_S = 6;
+
+/** Que interaccion tiene al alcance el jugador local. */
+export const HINT_NONE = 0;
+export const HINT_CHEST = 1;
+export const HINT_ENTER_CAR = 2;
+export const HINT_EXIT_CAR = 3;
 
 /** Radianes por pixel de arrastre. Un giro completo son ~1500 px. */
 const LOOK_SENS = 0.0042;
@@ -101,8 +116,6 @@ const TRACER_LIFE_S = 0.14;
 const SPARK_LIFE_S = 0.45;
 const FLASH_LIFE_S = 0.07;
 const SPARK_GRAVITY = 14;
-/** Un cliente no sabe donde pego su tiro: la estela se dibuja hasta aca. */
-const CLIENT_TRACER_LENGTH = 48;
 /**
  * Cuatro buffers de input, no dos: `sendInput` se toma por referencia y el
  * limitador lo puede diferir hasta 33 ms, que son dos pasos mas.
@@ -125,7 +138,7 @@ export type ShooterView = {
   readonly map: ShooterMap;
   readonly rules: ShooterRules;
   readonly isHost: boolean;
-  /** Asiento local. En el proyector es 0 y no juega. */
+  /** Asiento local. En el proyector es 0 y no juega salvo `hostPlaying`. */
   readonly seat: number;
   /** Solo en el host. */
   readonly world: ShooterWorld | null;
@@ -149,7 +162,22 @@ export type ShooterView = {
   readonly z: Float32Array;
   readonly yaw: Float32Array;
   readonly pitch: Float32Array;
+  readonly weapon: Uint8Array;
+  /** Auto que maneja cada asiento, o -1. */
+  readonly driving: Int8Array;
   readonly names: string[];
+
+  /* Los autos. */
+  readonly carCount: number;
+  readonly carX: Float32Array;
+  readonly carY: Float32Array;
+  readonly carZ: Float32Array;
+  readonly carYaw: Float32Array;
+  readonly carSpeed: Float32Array;
+  readonly carDriver: Int8Array;
+
+  /* Los cofres: mascara de abiertos, como viaja por red. */
+  chestOpened: number;
 
   /* La partida. 0 esperando, 1 despliegue, 2 jugando, 3 terminada. */
   state: number;
@@ -162,16 +190,27 @@ export type ShooterView = {
   ringZ: number;
   ringRadius: number;
 
-  /* El jugador local (cliente). */
+  /* El jugador local. */
   readonly body: PlayerBody;
   readonly prediction: Prediction<PlayerBody, ShooterInput> | null;
   readonly inputs: ShooterInput[];
   inputCursor: number;
   camYaw: number;
   camPitch: number;
+  /** El arma en mano y su especificacion (se renueva solo al cambiar de arma). */
+  ownWeapon: number;
+  ownSpec: WeaponSpec;
   ammo: number;
   reloadLeft: number;
   cooldown: number;
+  /** Auto que maneja el jugador local, o -1. */
+  ownDriving: number;
+  /** El boton/tecla de interactuar pidio algo desde el ultimo paso. */
+  interactQueued: boolean;
+  /** Que se puede hacer ahora (`HINT_*`). Para el aviso en pantalla. */
+  interactHint: number;
+  /** Cofres que abrio el jugador local. */
+  chestsOpened: number;
   /** Cliente → host. Lo conecta `ShooterGame` cuando existe el puerto. */
   send: ((input: ShooterInput, sequence: number) => void) | null;
   /** Host → todos. Idem. */
@@ -191,6 +230,7 @@ export type ShooterView = {
   /* Eventos vistos (cliente), para detectar los nuevos. */
   hitCodeSeen: number;
   killCodeSeen: number;
+  chestsSeen: number;
   readonly firedTick: Int32Array;
 
   /* Resultado local. */
@@ -226,6 +266,7 @@ export type ShooterView = {
 };
 
 const dirScratch = new Float32Array(3);
+const carScratch: CarBody = { x: 0, y: 0, z: 0, yaw: 0, speed: 0, driver: -1 };
 
 function clamp(value: number, min: number, max: number): number {
   return value < min ? min : value > max ? max : value;
@@ -245,16 +286,16 @@ export function createView(options: {
 }): ShooterView {
   const { map, rules, isHost, seat } = options;
   const n = MAX_PLAYERS;
-  const spawn = map.spawns[Math.max(0, Math.min(n - 1, seat))] ?? { x: 0, z: 20 };
+  const spawn = map.spawns[Math.max(0, Math.min(n - 1, seat))] ?? { x: 0, z: 40 };
 
   const body: PlayerBody = {
     x: spawn.x,
-    y: 0,
+    y: terrainHeight(map, spawn.x, spawn.z),
     z: spawn.z,
     vx: 0,
     vy: 0,
     vz: 0,
-    yaw: yawTowards(spawn.x, spawn.z, 0, 0),
+    yaw: yawTowards(spawn.x, spawn.z, map.landmark.x, map.landmark.z),
     pitch: 0,
     onGround: true,
   };
@@ -264,6 +305,8 @@ export function createView(options: {
 
   const inputs: ShooterInput[] = [];
   for (let i = 0; i < INPUT_BUFFERS; i++) inputs.push(createInput());
+
+  const pistol = weaponSpec(rules, 0);
 
   const view: ShooterView = {
     map,
@@ -284,7 +327,19 @@ export function createView(options: {
     z: new Float32Array(n),
     yaw: new Float32Array(n),
     pitch: new Float32Array(n),
+    weapon: new Uint8Array(n),
+    driving: new Int8Array(n).fill(-1),
     names,
+
+    carCount: Math.min(MAX_CARS, map.cars.length),
+    carX: new Float32Array(MAX_CARS),
+    carY: new Float32Array(MAX_CARS),
+    carZ: new Float32Array(MAX_CARS),
+    carYaw: new Float32Array(MAX_CARS),
+    carSpeed: new Float32Array(MAX_CARS),
+    carDriver: new Int8Array(MAX_CARS).fill(-1),
+
+    chestOpened: 0,
 
     state: 0,
     timeS: 0,
@@ -302,9 +357,15 @@ export function createView(options: {
     inputCursor: 0,
     camYaw: body.yaw,
     camPitch: 0,
-    ammo: rules.magazine,
+    ownWeapon: 0,
+    ownSpec: pistol,
+    ammo: pistol.magazine,
     reloadLeft: 0,
     cooldown: 0,
+    ownDriving: -1,
+    interactQueued: false,
+    interactHint: HINT_NONE,
+    chestsOpened: 0,
     send: null,
     publish: null,
 
@@ -318,6 +379,7 @@ export function createView(options: {
 
     hitCodeSeen: 0,
     killCodeSeen: 0,
+    chestsSeen: 0,
     firedTick: new Int32Array(n).fill(-1),
 
     spectating: false,
@@ -346,12 +408,27 @@ export function createView(options: {
     flashes: new Float32Array(n),
   };
 
+  // Los autos arrancan donde dice el mapa, en los dos roles: hasta que llegue
+  // estado, el celular los dibuja quietos en su lugar.
+  for (let car = 0; car < view.carCount; car++) {
+    const spot = map.cars[car];
+    if (!spot) continue;
+    view.carX[car] = spot.x;
+    view.carZ[car] = spot.z;
+    view.carY[car] = terrainHeight(map, spot.x, spot.z);
+    view.carYaw[car] = spot.yaw;
+  }
+
   if (!isHost) {
     /*
      * La prediccion pide una funcion pura, asi que cada paso devuelve un
      * cuerpo nuevo. Son diez numeros sesenta veces por segundo: el recolector
      * de la generacion joven ni se entera. La alternativa —mutar `state`—
      * corromperia el estado confirmado al re-simular.
+     *
+     * Manejando no se predice: el auto es del host, y el cuerpo lo sigue en
+     * `applySampled`. Devolver el estado tal cual deja la cola de inputs
+     * inerte hasta que se baje.
      */
     const prediction = createPrediction<PlayerBody, ShooterInput>(body, {
       dt: STEP,
@@ -367,7 +444,7 @@ export function createView(options: {
           pitch: state.pitch,
           onGround: state.onGround,
         };
-        simulateBody(next, input, dt, map, rules, view.state === 2);
+        if (view.ownDriving < 0) simulateBody(next, input, dt, map, rules, view.state === 2);
         return next;
       },
     });
@@ -440,6 +517,7 @@ export function setHostPlaying(view: ShooterView, playing: boolean): void {
     hostLocalMirror(view, world);
   } else {
     view.spectating = false;
+    view.interactHint = HINT_NONE;
   }
 }
 
@@ -456,6 +534,8 @@ function hostLocalInput(view: ShooterView, world: ShooterWorld, sticks: StickSam
   input.pitch = view.camPitch;
   input.fire = sticks.fire;
   input.jump = sticks.jump;
+  input.interact = view.interactQueued;
+  view.interactQueued = false;
   setInput(world, 0, input);
 }
 
@@ -474,8 +554,10 @@ function hostLocalMirror(view: ShooterView, world: ShooterWorld): void {
 
   view.ownHp = world.hp[0] ?? 0;
   view.ownAlive = world.active[0] === 1 && world.alive[0] === 1;
+  setOwnWeapon(view, world.weapon[0] ?? 0);
   view.ammo = world.ammo[0] ?? 0;
   view.reloadLeft = world.reload[0] ?? 0;
+  view.ownDriving = world.driving[0] ?? -1;
   if (world.fired[0] === 1) view.recoil = 1;
   view.kills = world.kills[0] ?? 0;
   view.damageDealt = world.damage[0] ?? 0;
@@ -504,6 +586,10 @@ function hostLocalMirror(view: ShooterView, world: ShooterWorld): void {
       view.hitCount++;
     }
   }
+  for (let i = 0; i < world.chestEventCount; i++) {
+    if ((world.chestEventSeat[i] ?? -1) === 0) view.chestsOpened++;
+  }
+  view.interactHint = computeHint(view);
 }
 
 /** Un paso fijo del host. Simula, cosecha efectos y publica cuando toca. */
@@ -511,6 +597,7 @@ export function hostStep(view: ShooterView, dt: number, sticks: StickSample): vo
   const world = view.world;
   if (!world) return;
   if (view.hostPlaying && !view.spectating) hostLocalInput(view, world, sticks);
+  else view.interactQueued = false;
   stepWorld(world, dt, view.rng);
 
   // Tiros: estela exacta, del canio al punto de impacto o al final del rayo.
@@ -548,6 +635,10 @@ export function hostStep(view: ShooterView, dt: number, sticks: StickSample): vo
     view.killCounter++;
     view.lastKillCode = encodeKill(victim, killer, view.killCounter);
     pushFeed(view, victim, killer);
+  }
+  for (let i = 0; i < world.chestEventCount; i++) {
+    const chest = world.map.chests[world.chestEventIndex[i] ?? -1];
+    if (chest) spawnSparks(view, chest.x, chest.y + 0.9, chest.z, 14);
   }
 
   copyWorldToArrays(view);
@@ -592,7 +683,18 @@ function copyWorldToArrays(view: ShooterView): void {
     view.z[seat] = world.z[seat] ?? 0;
     view.yaw[seat] = world.yaw[seat] ?? 0;
     view.pitch[seat] = world.pitch[seat] ?? 0;
+    view.weapon[seat] = world.weapon[seat] ?? 0;
+    view.driving[seat] = world.driving[seat] ?? -1;
   }
+  for (let car = 0; car < MAX_CARS; car++) {
+    view.carX[car] = world.carX[car] ?? 0;
+    view.carY[car] = world.carY[car] ?? 0;
+    view.carZ[car] = world.carZ[car] ?? 0;
+    view.carYaw[car] = world.carYaw[car] ?? 0;
+    view.carSpeed[car] = world.carSpeed[car] ?? 0;
+    view.carDriver[car] = world.carDriver[car] ?? -1;
+  }
+  view.chestOpened = world.chestOpened;
   view.state = world.phase === "deploy" ? 1 : world.phase === "playing" ? 2 : 3;
   view.timeS = Math.max(0, Math.floor(world.time - view.rules.deploySeconds));
   view.deployLeft = Math.ceil(world.deployLeft);
@@ -605,12 +707,41 @@ function copyWorldToArrays(view: ShooterView): void {
 }
 
 /* ------------------------------------------------------------------ */
+/* Compartido                                                          */
+/* ------------------------------------------------------------------ */
+
+/** Cambia el arma local, renovando la especificacion solo si es otra. */
+function setOwnWeapon(view: ShooterView, kind: number): void {
+  if (kind === view.ownWeapon) return;
+  view.ownWeapon = kind;
+  view.ownSpec = weaponSpec(view.rules, kind);
+  view.ammo = view.ownSpec.magazine;
+  view.reloadLeft = 0;
+  view.cooldown = 0;
+}
+
+/** Que puede hacer el jugador local ahora mismo con el boton de interactuar. */
+function computeHint(view: ShooterView): number {
+  if (!view.ownAlive || view.state !== 2 || view.spectating) return HINT_NONE;
+  if (view.ownDriving >= 0) return HINT_EXIT_CAR;
+  const x = view.body.x;
+  const z = view.body.z;
+  if (nearestClosedChest(view.map, view.chestOpened, x, z) >= 0) return HINT_CHEST;
+  for (let car = 0; car < view.carCount; car++) {
+    if ((view.carDriver[car] ?? -1) >= 0) continue;
+    if (Math.hypot((view.carX[car] ?? 0) - x, (view.carZ[car] ?? 0) - z) < INTERACT_RADIUS) return HINT_ENTER_CAR;
+  }
+  return HINT_NONE;
+}
+
+/* ------------------------------------------------------------------ */
 /* Cliente                                                             */
 /* ------------------------------------------------------------------ */
 
 /**
  * Un paso fijo del celular: mirar, moverse (predicho), disparar (simulado
  * localmente solo para el HUD y el arma en pantalla) y mandar el input.
+ * Manejando, el mismo stick es volante y acelerador y viaja igual.
  */
 export function clientStep(view: ShooterView, dt: number, sticks: StickSample): void {
   const prediction = view.prediction;
@@ -633,17 +764,22 @@ export function clientStep(view: ShooterView, dt: number, sticks: StickSample): 
     input.pitch = view.camPitch;
     input.fire = sticks.fire;
     input.jump = sticks.jump;
+    input.interact = view.interactQueued;
+    view.interactQueued = false;
 
     const sequence = prediction.predict(input);
     view.send?.(input, sequence);
-    copyPredicted(view, prediction.predicted);
+    if (view.ownDriving < 0) copyPredicted(view, prediction.predicted);
     stepLocalWeapon(view, dt, input.fire);
+  } else {
+    view.interactQueued = false;
   }
 
   view.outsideRing =
     view.state >= 1 &&
     view.ringRadius > 0 &&
     Math.hypot(view.body.x - view.ringX, view.body.z - view.ringZ) > view.ringRadius;
+  view.interactHint = computeHint(view);
 }
 
 function copyPredicted(view: ShooterView, predicted: PlayerBody): void {
@@ -675,24 +811,24 @@ function copyBodyToArrays(view: ShooterView): void {
  * 100 ms despues; si difiere en un tiro, el host tiene razon y no se nota.
  */
 function stepLocalWeapon(view: ShooterView, dt: number, fire: boolean): void {
-  const rules = view.rules;
+  const spec = view.ownSpec;
   if (view.cooldown > 0) view.cooldown -= dt;
   if (view.reloadLeft > 0) {
     view.reloadLeft -= dt;
     if (view.reloadLeft <= 0) {
       view.reloadLeft = 0;
-      view.ammo = rules.magazine;
+      view.ammo = spec.magazine;
     }
     return;
   }
   if (view.ammo <= 0) {
-    view.reloadLeft = rules.reloadS;
+    view.reloadLeft = spec.reloadS;
     return;
   }
-  if (!fire || view.cooldown > 0 || view.state !== 2 || !view.ownAlive) return;
+  if (!fire || view.cooldown > 0 || view.state !== 2 || !view.ownAlive || view.ownDriving >= 0) return;
 
   view.ammo--;
-  view.cooldown = rules.fireIntervalS;
+  view.cooldown = spec.fireIntervalS;
   view.recoil = 1;
   view.flashes[view.seat] = 1;
   if (!view.reducedMotion) view.shake = Math.max(view.shake, 0.25);
@@ -708,16 +844,13 @@ function stepLocalWeapon(view: ShooterView, dt: number, fire: boolean): void {
   const ox = body.x + dx * 0.7 + rx * 0.22;
   const oy = body.y + EYE_HEIGHT - 0.16 + dy * 0.7;
   const oz = body.z + dz * 0.7 + rz * 0.22;
-  spawnTracer(
-    view,
-    ox,
-    oy,
-    oz,
-    ox + dx * CLIENT_TRACER_LENGTH,
-    oy + dy * CLIENT_TRACER_LENGTH,
-    oz + dz * CLIENT_TRACER_LENGTH,
-    view.seat,
-  );
+  // El cliente no sabe donde pega: la estela llega hasta el alcance del arma.
+  const reach = spec.maxRange;
+  for (let ray = 0; ray < spec.rays; ray++) {
+    const jx = spec.rays > 1 ? view.rng.range(-spec.cone, spec.cone) : 0;
+    const jy = spec.rays > 1 ? view.rng.range(-spec.cone, spec.cone) * 0.7 : 0;
+    spawnTracer(view, ox, oy, oz, ox + (dx + jx) * reach, oy + (dy + jy) * reach, oz + (dz + jx * 0.5) * reach, view.seat);
+  }
 }
 
 const confirmedScratch: PlayerBody = {
@@ -733,8 +866,8 @@ const confirmedScratch: PlayerBody = {
 };
 
 /**
- * Llego estado autoritativo (crudo, no interpolado). Escalares, eventos y la
- * reconciliacion del cuerpo propio.
+ * Llego estado autoritativo (crudo, no interpolado). Escalares, eventos, los
+ * autos y la reconciliacion del cuerpo propio.
  */
 export function clientOnState(view: ShooterView, state: NetSnapshot, ackedSequence: number): void {
   const s = state.scalars;
@@ -756,6 +889,37 @@ export function clientOnState(view: ShooterView, state: NetSnapshot, ackedSequen
   if (wasState === 3 && view.state < 3) resetLocal(view);
 
   const seat = view.seat;
+
+  // Los cofres: los que se abrieron desde el ultimo estado salpican.
+  const opened = s[S_CHESTS_OPENED] ?? 0;
+  const fresh = opened & ~view.chestsSeen;
+  if (fresh !== 0) {
+    for (let i = 0; i < view.map.chests.length; i++) {
+      if ((fresh & (1 << i)) === 0) continue;
+      const chest = view.map.chests[i];
+      if (chest) spawnSparks(view, chest.x, chest.y + 0.9, chest.z, 14);
+    }
+    view.chestsSeen = opened;
+  }
+  view.chestOpened = opened;
+
+  // El arma propia: si el host dice otra, es que un cofre la dio.
+  const weapon = snapshotWeapon(state, seat);
+  if (weapon !== view.ownWeapon) {
+    setOwnWeapon(view, weapon);
+    view.chestsOpened++;
+  }
+
+  // Los autos, crudos: solo para saber si el propio esta arriba de uno.
+  let driving = -1;
+  for (const entity of state.entities) {
+    if (!isCarEntity(entity)) continue;
+    readCar(entity, carScratch);
+    if (carScratch.driver === seat) driving = entity.id - 16;
+  }
+  const wasDriving = view.ownDriving;
+  view.ownDriving = driving;
+
   let own: (typeof state.entities)[number] | undefined;
   for (const entity of state.entities) {
     if (entity.id === seat) {
@@ -770,20 +934,27 @@ export function clientOnState(view: ShooterView, state: NetSnapshot, ackedSequen
     view.hp[seat] = view.ownHp;
 
     if (view.ownAlive && view.prediction) {
-      // Del snapshot al cuerpo confirmado. La velocidad horizontal no viaja:
-      // se re-simulan los inputs pendientes desde cero, que es un error de
-      // unos centimetros a 100 ms de latencia.
       readEntity(own, confirmedScratch);
       confirmedScratch.vx = 0;
       confirmedScratch.vz = 0;
-      confirmedScratch.vy = view.body.vy;
+      confirmedScratch.vy = driving >= 0 ? 0 : view.body.vy;
       const ground = groundHeight(view.map, confirmedScratch.x, confirmedScratch.z, confirmedScratch.y);
       confirmedScratch.onGround = confirmedScratch.y <= ground + 0.03;
       // El rumbo lo manda el celular, no el host: lo confirmado es la posicion.
       confirmedScratch.yaw = view.camYaw;
       confirmedScratch.pitch = view.camPitch;
       const confirmed: PlayerBody = { ...confirmedScratch };
-      copyPredicted(view, view.prediction.reconcile(confirmed, ackedSequence));
+      if (driving >= 0) {
+        // Arriba del auto la cola de inputs es volante, no pasos: se descarta.
+        view.prediction.reset(confirmed);
+        copyPredicted(view, confirmed);
+      } else if (wasDriving >= 0) {
+        // Recien se bajo: el host lo puso al costado del auto. Desde ahi.
+        view.prediction.reset(confirmed);
+        copyPredicted(view, confirmed);
+      } else {
+        copyPredicted(view, view.prediction.reconcile(confirmed, ackedSequence));
+      }
     } else if (!view.ownAlive && !view.spectating && view.state >= 2 && active) {
       // Muerto: se mira la partida desde arriba. El puesto es cuantos quedan
       // vivos mas uno, que es lo que el host escribio al matarlo.
@@ -809,7 +980,7 @@ export function clientOnState(view: ShooterView, state: NetSnapshot, ackedSequen
       if (attacker === seat) {
         view.hitMarkerAge = 1;
         view.hitCount++;
-        view.damageDealt += view.rules.bodyDamage;
+        view.damageDealt += view.ownSpec.bodyDamage;
       }
     }
   }
@@ -836,15 +1007,15 @@ function yawTo(view: ShooterView, state: NetSnapshot, attacker: number): number 
 }
 
 function resetLocal(view: ShooterView): void {
-  const spawn = view.map.spawns[view.seat] ?? { x: 0, z: 20 };
+  const spawn = view.map.spawns[view.seat] ?? { x: 0, z: 40 };
   const body = view.body;
   body.x = spawn.x;
-  body.y = 0;
+  body.y = terrainHeight(view.map, spawn.x, spawn.z);
   body.z = spawn.z;
   body.vx = 0;
   body.vy = 0;
   body.vz = 0;
-  body.yaw = yawTowards(spawn.x, spawn.z, 0, 0);
+  body.yaw = yawTowards(spawn.x, spawn.z, view.map.landmark.x, view.map.landmark.z);
   body.pitch = 0;
   body.onGround = true;
   view.camYaw = body.yaw;
@@ -854,9 +1025,12 @@ function resetLocal(view: ShooterView): void {
   view.placement = 0;
   view.kills = 0;
   view.damageDealt = 0;
-  view.ammo = view.rules.magazine;
-  view.reloadLeft = 0;
-  view.cooldown = 0;
+  view.ownWeapon = -1;
+  setOwnWeapon(view, 0);
+  view.ownDriving = -1;
+  view.chestsOpened = 0;
+  view.chestsSeen = 0;
+  view.chestOpened = 0;
   view.overAt = -1;
   view.feed.length = 0;
   view.alive[view.seat] = 1;
@@ -864,17 +1038,33 @@ function resetLocal(view: ShooterView): void {
 }
 
 /**
- * Lo que el celular dibuja de LOS DEMAS: el estado interpolado que entrega
- * `useGameNet`, ~100 ms atras. Corre por cuadro, no por paso.
+ * Lo que el celular dibuja de LOS DEMAS y de los autos: el estado interpolado
+ * que entrega `useGameNet`, ~100 ms atras. Corre por cuadro, no por paso.
  */
 export function applySampled(view: ShooterView, sampled: NetSnapshot | null): void {
   if (!sampled) return;
   const activeMask = sampled.scalars[S_ACTIVE] ?? 0;
+  for (let seat = 0; seat < MAX_PLAYERS; seat++) view.driving[seat] = -1;
+
   for (const entity of sampled.entities) {
+    if (isCarEntity(entity)) {
+      const car = entity.id - 16;
+      if (car < 0 || car >= MAX_CARS) continue;
+      readCar(entity, carScratch);
+      view.carX[car] = carScratch.x;
+      view.carY[car] = carScratch.y;
+      view.carZ[car] = carScratch.z;
+      view.carYaw[car] = carScratch.yaw;
+      view.carSpeed[car] = carScratch.speed;
+      view.carDriver[car] = carScratch.driver;
+      if (carScratch.driver >= 0 && carScratch.driver < MAX_PLAYERS) view.driving[carScratch.driver] = car;
+      continue;
+    }
     const seat = entity.id;
     if (seat < 0 || seat >= MAX_PLAYERS) continue;
     const active = (activeMask & (1 << seat)) !== 0;
     const hp = entityHp(entity);
+    view.weapon[seat] = snapshotWeapon(sampled, seat);
     if (seat === view.seat) {
       // El propio se dibuja predicho, no interpolado: solo la vida viene de aca.
       view.active[seat] = 1;
@@ -904,18 +1094,32 @@ export function applySampled(view: ShooterView, sampled: NetSnapshot | null): vo
       const ox = confirmedScratch.x + dx * 0.9 + rx * 0.3;
       const oy = confirmedScratch.y + EYE_HEIGHT - 0.3 + dy * 0.9;
       const oz = confirmedScratch.z + dz * 0.9 + rz * 0.3;
-      spawnTracer(
-        view,
-        ox,
-        oy,
-        oz,
-        ox + dx * CLIENT_TRACER_LENGTH,
-        oy + dy * CLIENT_TRACER_LENGTH,
-        oz + dz * CLIENT_TRACER_LENGTH,
-        seat,
-      );
+      const reach = weaponSpecCached(view, view.weapon[seat] ?? 0).maxRange;
+      spawnTracer(view, ox, oy, oz, ox + dx * reach, oy + dy * reach, oz + dz * reach, seat);
     }
   }
+
+  // Manejando, el cuerpo propio va donde va el auto interpolado.
+  if (view.ownDriving >= 0) {
+    const car = view.ownDriving;
+    view.body.x = view.carX[car] ?? 0;
+    view.body.y = (view.carY[car] ?? 0) + 0.3;
+    view.body.z = view.carZ[car] ?? 0;
+    view.body.yaw = view.camYaw;
+    view.body.pitch = view.camPitch;
+    copyBodyToArrays(view);
+  }
+}
+
+/** Alcance por tipo de arma, para las estelas ajenas. Sin asignar por cuadro. */
+const reachByKind: WeaponSpec[] = [];
+function weaponSpecCached(view: ShooterView, kind: number): WeaponSpec {
+  let spec = reachByKind[kind];
+  if (!spec || spec.kind !== kind) {
+    spec = weaponSpec(view.rules, kind);
+    reachByKind[kind] = spec;
+  }
+  return spec;
 }
 
 /* ------------------------------------------------------------------ */

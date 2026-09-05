@@ -28,6 +28,15 @@ const TOKENS = [
   "--sn-success",
   "--sn-warn",
   "--sn-danger",
+  // Paisaje de Bubble Shooter Game. Aditivos: ningun otro juego los usa.
+  "--sn-grass-400",
+  "--sn-grass-600",
+  "--sn-rock-400",
+  "--sn-rock-600",
+  "--sn-sunset-top",
+  "--sn-sunset-horizon",
+  "--sn-sunset-low",
+  "--sn-water-400",
 ] as const;
 
 export type PaletteToken = (typeof TOKENS)[number];
