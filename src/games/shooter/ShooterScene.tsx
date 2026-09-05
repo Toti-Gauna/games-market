@@ -1,15 +1,17 @@
 import { useEffect, useMemo, useRef } from "react";
 import { useFrame, useThree } from "@react-three/fiber";
+import type {
+  Color} from "three";
 import {
   AdditiveBlending,
   CylinderGeometry,
   Float32BufferAttribute,
   MeshBasicMaterial,
   PlaneGeometry,
-  Quaternion,
   SphereGeometry,
   Vector3,
   type BufferGeometry,
+  type DirectionalLight,
   type Group,
   type Mesh,
   type PerspectiveCamera,
@@ -17,7 +19,7 @@ import {
 import type { NetSnapshot } from "@/core/net/snapshot";
 import { getGeometry } from "@/core/engine3d/geometry";
 import { getColor, getMaterial } from "@/core/engine3d/materials";
-import { getRingMaterial, getSkyMaterial, tickShaders } from "@/core/engine3d/shaders";
+import { getSkyMaterial, getTideMaterial, tickShaders } from "@/core/engine3d/shaders";
 import { createInstanceWriter, fillStatic, type InstanceWriter } from "@/core/engine3d/instancing";
 import { useFixedStep } from "@/core/engine3d/useFixedStep";
 import {
@@ -30,6 +32,7 @@ import {
   mountainHeight,
   terrainHeight,
   terrainSlope,
+  valueNoise,
   type ShooterMap,
 } from "./map";
 import { EYE_HEIGHT, groundHeight, lookDirection } from "./logic";
@@ -75,6 +78,13 @@ const FOV_SPECTATOR = 58;
 const FOV_LOBBY = 42;
 /** Cuantas celdas por lado tiene la malla del terreno. */
 const TERRAIN_SEGMENTS = 120;
+/**
+ * Gotas por chorro. El disparo se resuelve como un rayo recto —eso es lo que
+ * decide si pega— pero se DIBUJA como agua: unas cuantas gotas repartidas a
+ * lo largo, con una panza hacia abajo que es cero en las dos puntas.
+ */
+const DROPS = 7;
+const DROP_SAG = 0.055;
 
 export type ShooterSceneProps = {
   view: ShooterView;
@@ -101,8 +111,6 @@ export function ShooterScene(props: ShooterSceneProps) {
         que una capsula de un solo color no se vea plana desde ningun angulo.
       */}
       <hemisphereLight args={[getColor("--sn-sunset-horizon"), getColor("--sn-grass-600"), 0.85]} />
-      {/* El sol, bajo y calido. Sin sombras: el sombreado esta en los vertices. */}
-      <directionalLight position={[70, 55, -40]} intensity={1.15} color={getColor("--sn-sunset-horizon")} />
 
       <Terrain map={props.view.map} />
       <Arena map={props.view.map} />
@@ -114,6 +122,13 @@ export function ShooterScene(props: ShooterSceneProps) {
 /* ------------------------------------------------------------------ */
 /* El terreno                                                          */
 /* ------------------------------------------------------------------ */
+
+/** Hasta donde llega la sombra de contacto al pie de una roca, en unidades. */
+const AO_REACH = 2.4;
+
+function clamp01(value: number): number {
+  return value < 0 ? 0 : value > 1 ? 1 : value;
+}
 
 function smoothstep(a: number, b: number, t: number): number {
   const x = Math.max(0, Math.min(1, (t - a) / (b - a)));
@@ -151,11 +166,28 @@ function buildTerrain(map: ShooterMap): BufferGeometry {
 
     // Roca donde la ladera aprieta o el cerro sube; pasto en el resto.
     const rockiness = Math.min(1, smoothstep(0.45, 0.95, slope) + smoothstep(6, 20, mountain) * 0.65);
-    // Manchones de pasto: dos verdes mezclados con una onda barata.
-    const patch = 0.5 + 0.5 * Math.sin(x * 0.17 + z * 0.05) * Math.cos(z * 0.13 - x * 0.04);
+    /*
+     * Manchones de pasto: dos escalas de ruido, una de claros grandes y otra
+     * de mata chica. Es el mismo ruido que ondula el terreno, con otra escala,
+     * asi el color acompania a la forma en vez de contradecirla.
+     */
+    const patch = clamp01(
+      valueNoise(x, z, 17, map.noiseSeed) * 0.7 + valueNoise(x, z, 4.5, map.noiseSeed + 31) * 0.3,
+    );
     const rockShade = smoothstep(4, 24, mountain);
-    // Oclusion horneada: la pendiente oscurece un poco, como sombra propia.
-    const shade = 1 - Math.min(0.35, slope * 0.22);
+    /*
+     * Oclusion horneada: oscurece donde la pendiente aprieta y al pie de las
+     * rocas. Es lo que hace que una caja apoyada en el pasto se vea apoyada y
+     * no pegada encima, sin una sola sombra dinamica.
+     */
+    let contact = 0;
+    for (const box of map.cover) {
+      const dx = Math.max(0, Math.abs(x - box.x) - box.w / 2);
+      const dz = Math.max(0, Math.abs(z - box.z) - box.d / 2);
+      const d = Math.hypot(dx, dz);
+      if (d < AO_REACH) contact = Math.max(contact, 1 - d / AO_REACH);
+    }
+    const shade = (1 - Math.min(0.35, slope * 0.22)) * (1 - contact * 0.4);
 
     const gr = grassA.r + (grassB.r - grassA.r) * patch;
     const gg = grassA.g + (grassB.g - grassA.g) * patch;
@@ -192,7 +224,7 @@ function Arena({ map }: { map: ShooterMap }) {
   const wall = getMaterial("--sn-rock-600", { kind: "lambert", vertexColors: true });
 
   const rocks = useMemo<InstanceWriter>(
-    () => createInstanceWriter(getGeometry("boxShaded"), rock, 96),
+    () => createInstanceWriter(getGeometry("boxShaded"), rock, 96, { colors: true }),
     [rock],
   );
   const walls = useMemo<InstanceWriter>(
@@ -210,6 +242,13 @@ function Arena({ map }: { map: ShooterMap }) {
   useEffect(() => {
     fillStatic(rocks, map.cover, (box, writer) => {
       writer.push(box.x, box.y, box.z, box.w, box.h, box.d);
+      /*
+       * Cada roca, un gris apenas distinto. Sale de su posicion y no de un
+       * azar: es el mismo peniasco en las diez pantallas. Sin esto, sesenta
+       * cajas del mismo tono exacto se leen como sesenta copias.
+       */
+      const tone = 0.82 + valueNoise(box.x, box.z, 7, map.noiseSeed + 91) * 0.36;
+      writer.tint(tone, tone, tone);
     });
     // Un murete bajo de roca en el borde: del mapa no se sale, y se ve donde
     // termina sin una pared de neon.
@@ -238,8 +277,6 @@ function Arena({ map }: { map: ShooterMap }) {
 /* ------------------------------------------------------------------ */
 /* Lo que se mueve                                                      */
 /* ------------------------------------------------------------------ */
-
-const Z_AXIS = new Vector3(0, 0, 1);
 
 /**
  * El color de un asiento: el que esa persona eligio, o el de su numero
@@ -336,7 +373,7 @@ function Runtime({ view, enabled, tick, sampleState, lobby }: ShooterSceneProps)
       shadows: createInstanceWriter(getGeometry("disc"), shadowMaterial, MAX_PLAYERS + MAX_CARS),
       flashes: createInstanceWriter(getGeometry("sphere"), additive, MAX_PLAYERS, { colors: true }),
       beacons: createInstanceWriter(getGeometry("cylinder"), glow, MAX_PLAYERS, { colors: true }),
-      tracers: createInstanceWriter(getGeometry("box"), additive, TRACER_MAX, { colors: true }),
+      tracers: createInstanceWriter(getGeometry("sphere"), additive, TRACER_MAX * DROPS, { colors: true }),
       sparks: createInstanceWriter(getGeometry("box"), additive, SPARK_MAX, { colors: true }),
       carBodies: createInstanceWriter(getGeometry("boxShaded"), tintedShaded, MAX_CARS, { colors: true }),
       carCabins: createInstanceWriter(getGeometry("boxShaded"), tintedShaded, MAX_CARS, { colors: true }),
@@ -383,6 +420,38 @@ function Runtime({ view, enabled, tick, sampleState, lobby }: ShooterSceneProps)
   const skyRef = useRef<Mesh>(null);
   const ringRef = useRef<Mesh>(null);
   const avatarRef = useRef<Mesh>(null);
+  const sunRef = useRef<Mesh>(null);
+  const sunLightRef = useRef<DirectionalLight>(null);
+
+  /**
+   * El sol: un disco emisivo lejano y la luz que lo acompania.
+   *
+   * El material es propio y no del cache porque su color cambia durante la
+   * partida — mutar uno compartido pintaria medio catalogo de naranja.
+   */
+  const sunMaterial = useMemo(
+    () =>
+      new MeshBasicMaterial({
+        color: getColor("--sn-sunset-horizon").clone(),
+        transparent: true,
+        opacity: 0.85,
+        blending: AdditiveBlending,
+        depthWrite: false,
+        fog: false,
+      }),
+    [],
+  );
+  useEffect(() => () => sunMaterial.dispose(), [sunMaterial]);
+  /** Los dos extremos del atardecer y el color que se mezcla entre ellos. */
+  const sunColors = useMemo(
+    () => ({
+      alto: getColor("--sn-sunset-horizon").clone(),
+      bajo: getColor("--sn-sunset-low").clone(),
+      actual: getColor("--sn-sunset-horizon").clone(),
+      dir: new Vector3(),
+    }),
+    [],
+  );
 
   /**
    * Donde se para el personaje en la pantalla de inicio: su propio punto de
@@ -402,7 +471,6 @@ function Runtime({ view, enabled, tick, sampleState, lobby }: ShooterSceneProps)
     () => ({
       dir: new Float32Array(3),
       v: new Vector3(),
-      q: new Quaternion(),
       camPos: new Vector3(),
       camTarget: new Vector3(),
       lookAt: new Vector3(),
@@ -438,6 +506,7 @@ function Runtime({ view, enabled, tick, sampleState, lobby }: ShooterSceneProps)
 
     const sky = skyRef.current;
     if (sky) sky.position.copy(camera.position);
+    driveSun(view, camera, sunLightRef.current, sunRef.current, sunMaterial, sunColors);
 
     const ring = ringRef.current;
     if (ring) {
@@ -449,7 +518,7 @@ function Runtime({ view, enabled, tick, sampleState, lobby }: ShooterSceneProps)
     writePlayers(view, writers, skinRgb, palette, fpv, scratch.dir);
     writeCars(view, writers, skinRgb, palette);
     writeChests(view, writers, palette);
-    writeEffects(view, writers, skinRgb, palette, scratch);
+    writeEffects(view, writers, skinRgb, palette);
     driveViewmodel(view, viewmodelRef.current, gunRef.current, muzzleRef.current, camera, fpv);
   });
 
@@ -461,7 +530,17 @@ function Runtime({ view, enabled, tick, sampleState, lobby }: ShooterSceneProps)
         material={getSkyMaterial("--sn-sunset-top", "--sn-sunset-horizon", "--sn-sunset-low")}
         dispose={null}
       />
-      <mesh ref={ringRef} geometry={ringGeometry} material={getRingMaterial("--sn-magenta-400")} dispose={null} />
+      {/* El sol y su luz. Bajan juntos durante la partida (ver `driveSun`). */}
+      <directionalLight ref={sunLightRef} position={[70, 55, -40]} intensity={1.15} />
+      <mesh
+        ref={sunRef}
+        geometry={getGeometry("sphere")}
+        material={sunMaterial}
+        scale={26}
+        dispose={null}
+      />
+
+      <mesh ref={ringRef} geometry={ringGeometry} material={getTideMaterial("--sn-water-400")} dispose={null} />
 
       {Object.values(writers).map((writer, index) => (
         <primitive key={index} object={writer.mesh} />
@@ -536,7 +615,6 @@ function Runtime({ view, enabled, tick, sampleState, lobby }: ShooterSceneProps)
 type CameraScratch = {
   dir: Float32Array;
   v: Vector3;
-  q: Quaternion;
   camPos: Vector3;
   camTarget: Vector3;
   lookAt: Vector3;
@@ -692,6 +770,53 @@ function driveCamera(
   }
   camera.position.copy(scratch.camPos);
   camera.lookAt(scratch.lookAt);
+}
+
+/**
+ * El sol baja mientras corre la partida.
+ *
+ * Arranca alto y dorado y termina raspando el horizonte y rojizo, de modo que
+ * el anillo cerrandose y la luz apagandose empujan en la misma direccion: se
+ * hace tarde. Sin sombras dinamicas — el volumen ya esta horneado en los
+ * vertices, y un sol bajo lo resalta solo.
+ *
+ * El disco va pegado a la camara a 260 unidades, adentro del domo de cielo:
+ * asi se ve igual de lejos desde cualquier punto del valle, como el cielo.
+ */
+function driveSun(
+  view: ShooterView,
+  camera: PerspectiveCamera,
+  light: DirectionalLight | null,
+  disc: Mesh | null,
+  material: MeshBasicMaterial,
+  scratch: { alto: Color; bajo: Color; actual: Color; dir: Vector3 },
+): void {
+  const total = Math.max(1, view.rules.matchSeconds);
+  // Antes de empezar el sol esta en su punto mas alto: la pantalla de inicio
+  // y el despliegue se ven con la mejor luz.
+  const progress = Math.min(1, Math.max(0, view.timeS / total));
+  const elevation = 0.62 - 0.56 * progress;
+  const azimuth = -0.5;
+  const cos = Math.cos(elevation);
+  scratch.dir.set(cos * Math.sin(azimuth), Math.sin(elevation), cos * Math.cos(azimuth));
+
+  scratch.actual.copy(scratch.alto).lerp(scratch.bajo, progress * 0.85);
+  material.color.copy(scratch.actual);
+
+  if (light) {
+    light.position.set(scratch.dir.x * 120, scratch.dir.y * 120, scratch.dir.z * 120);
+    light.color.copy(scratch.actual);
+    // Se apaga a medida que cae, pero nunca del todo: en la ultima fase del
+    // anillo todavia hay que ver a quien se le dispara.
+    light.intensity = 1.25 - 0.6 * progress;
+  }
+  if (disc) {
+    disc.position.set(
+      camera.position.x + scratch.dir.x * 260,
+      camera.position.y + scratch.dir.y * 260,
+      camera.position.z + scratch.dir.z * 260,
+    );
+  }
 }
 
 /** Cuaternion de rumbo + inclinacion (orden YXZ), sin asignar. */
@@ -925,7 +1050,6 @@ function writeEffects(
   writers: Writers,
   skinRgb: Float32Array,
   palette: Palette,
-  scratch: CameraScratch,
 ): void {
   const { tracers, sparks } = writers;
   const t = view.tracers;
@@ -942,29 +1066,31 @@ function writeEffects(
     const dz = (t[base + 5] ?? 0) - z0;
     const length = Math.hypot(dx, dy, dz);
     if (length < 0.01) continue;
-    scratch.v.set(dx / length, dy / length, dz / length);
-    scratch.q.setFromUnitVectors(Z_AXIS, scratch.v);
-    const thickness = 0.03 + 0.08 * age;
-    tracers.pushQuat(
-      x0 + dx / 2,
-      y0 + dy / 2,
-      z0 + dz / 2,
-      scratch.q.x,
-      scratch.q.y,
-      scratch.q.z,
-      scratch.q.w,
-      thickness,
-      thickness,
-      length,
-    );
+
     // Agua del color de quien tira, apenas: se sabe de donde vino el chorro.
     const seat = Math.max(0, Math.min(MAX_PLAYERS - 1, Math.round(t[base + 7] ?? 0)));
     const skin = skinOf(view, seat);
-    tracers.tint(
-      (palette.water.r + (skinRgb[skin * 3] ?? 1)) * 0.5,
-      (palette.water.g + (skinRgb[skin * 3 + 1] ?? 1)) * 0.5,
-      (palette.water.b + (skinRgb[skin * 3 + 2] ?? 1)) * 0.5,
-    );
+    const r = (palette.water.r + (skinRgb[skin * 3] ?? 1)) * 0.5;
+    const g = (palette.water.g + (skinRgb[skin * 3 + 1] ?? 1)) * 0.5;
+    const b = (palette.water.b + (skinRgb[skin * 3 + 2] ?? 1)) * 0.5;
+
+    /*
+     * Las gotas avanzan con la edad en vez de aparecer todas juntas: el
+     * chorro sale del canio y viaja, que es lo que lo hace leerse como agua
+     * y no como un rayo laser. `age` va de 1 a 0, asi que el frente del
+     * chorro es (1 - age).
+     */
+    const front = 1 - age;
+    const sag = length * DROP_SAG;
+    for (let drop = 0; drop < DROPS; drop++) {
+      // Cada gota queda un poco atras del frente, repartidas en la cola.
+      const along = front - (drop / DROPS) * 0.55;
+      if (along <= 0 || along > 1) continue;
+      const droop = sag * along * (1 - along) * 4;
+      const size = (0.2 - drop * 0.014) * (0.5 + age * 0.5);
+      tracers.push(x0 + dx * along, y0 + dy * along - droop, z0 + dz * along, Math.max(0.03, size));
+      tracers.tint(r, g, b);
+    }
   }
   tracers.end();
 

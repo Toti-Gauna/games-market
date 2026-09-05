@@ -159,8 +159,13 @@ function hash2(ix: number, iz: number, seed: number): number {
   return (h >>> 0) / 4294967296;
 }
 
-/** Ruido de valor en 0..1 con interpolacion suave. */
-function valueNoise(x: number, z: number, cell: number, seed: number): number {
+/**
+ * Ruido de valor en 0..1 con interpolacion suave.
+ *
+ * Lo usa el terreno para ondular el pasto y la escena para manchar el verde:
+ * el mismo ruido, con otra escala, asi el color acompania a la forma.
+ */
+export function valueNoise(x: number, z: number, cell: number, seed: number): number {
   const fx = x / cell;
   const fz = z / cell;
   const ix = Math.floor(fx);

@@ -119,7 +119,7 @@ const LOOK_SENS = 0.0042;
 const PITCH_LIMIT = 1.4;
 const STEP = 1 / 60;
 const STATE_STEP = 1 / 20;
-const TRACER_LIFE_S = 0.14;
+const TRACER_LIFE_S = 0.24;
 const SPARK_LIFE_S = 0.45;
 const FLASH_LIFE_S = 0.07;
 const SPARK_GRAVITY = 14;
@@ -225,6 +225,13 @@ export type ShooterView = {
   interactHint: number;
   /** Cofres que abrio el jugador local. */
   chestsOpened: number;
+  /**
+   * Sonido. Lo conecta `ShooterGame` con el del ciclo de vida, que ya sabe
+   * si esta silenciado. Suena lo propio —el chorro y lo que se acierta o se
+   * recibe—, no los tiros de los diez: a catorce por segundo cada uno seria
+   * una lavadora.
+   */
+  playSfx: ((name: "squirt" | "splash") => void) | null;
   /** Cliente → host. Lo conecta `ShooterGame` cuando existe el puerto. */
   send: ((input: ShooterInput, sequence: number) => void) | null;
   /** Host → todos. Idem. */
@@ -388,6 +395,7 @@ export function createView(options: {
     interactQueued: false,
     interactHint: HINT_NONE,
     chestsOpened: 0,
+    playSfx: null,
     send: null,
     publish: null,
 
@@ -586,6 +594,7 @@ function hostLocalMirror(view: ShooterView, world: ShooterWorld): void {
   view.kills = world.kills[0] ?? 0;
   view.damageDealt = world.damage[0] ?? 0;
   view.outsideRing = view.state >= 1 && view.ringRadius > 0 && ringDistance(world, body.x, body.z) > 0;
+  if (world.fired[0] === 1) view.playSfx?.("squirt");
 
   if (!view.ownAlive && !view.spectating && view.state >= 2 && world.active[0] === 1) {
     view.spectating = true;
@@ -609,6 +618,7 @@ function hostLocalMirror(view: ShooterView, world: ShooterWorld): void {
       view.hitMarkerAge = 1;
       view.hitCount++;
     }
+    if (victim === 0 || attacker === 0) view.playSfx?.("splash");
   }
   for (let i = 0; i < world.chestEventCount; i++) {
     if ((world.chestEventSeat[i] ?? -1) === 0) view.chestsOpened++;
@@ -859,6 +869,7 @@ function stepLocalWeapon(view: ShooterView, dt: number, fire: boolean): void {
   view.cooldown = spec.fireIntervalS;
   view.recoil = 1;
   view.flashes[view.seat] = 1;
+  view.playSfx?.("squirt");
   if (!view.reducedMotion) view.shake = Math.max(view.shake, 0.25);
 
   const body = view.body;
@@ -1012,6 +1023,7 @@ export function clientOnState(view: ShooterView, state: NetSnapshot, ackedSequen
         view.hitCount++;
         view.damageDealt += view.ownSpec.bodyDamage;
       }
+      if (victim === seat || attacker === seat) view.playSfx?.("splash");
     }
   }
 

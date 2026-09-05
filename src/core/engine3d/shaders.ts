@@ -210,6 +210,61 @@ const RING_FRAGMENT = `
   }
 `;
 
+/* ------------------------------------------------------------------ */
+/* Marea                                                               */
+/* ------------------------------------------------------------------ */
+
+const TIDE_FRAGMENT = `
+  uniform vec3 uColor;
+  uniform float uTime;
+  varying vec2 vUv;
+  void main() {
+    /*
+     * Agua subiendo, no un campo de energia. Tres cosas la hacen leer como
+     * agua: una linea de espuma brillante arriba de todo, una ondulacion
+     * lenta de dos senos desfasados que rompe la horizontal perfecta, y un
+     * cuerpo casi transparente abajo para que se vea el terreno a traves.
+     */
+    float wave = sin(vUv.x * 34.0 + uTime * 1.6) * 0.5 + sin(vUv.x * 61.0 - uTime * 2.3) * 0.5;
+    float surface = 0.26 + wave * 0.012;
+    float foam = 1.0 - smoothstep(0.0, 0.045, abs(vUv.y - surface));
+    float body = 1.0 - smoothstep(0.0, surface, vUv.y);
+    float alpha = body * 0.22 + foam * 0.75;
+    // Contra el piso se desvanece: el borde de abajo del cilindro no existe.
+    alpha *= smoothstep(0.0, 0.03, vUv.y);
+    gl_FragColor = vec4(uColor, alpha);
+    ${COLORSPACE}
+  }
+`;
+
+/**
+ * El anillo del battle royale, con cara de marea: una superficie de agua que
+ * sube con espuma en el borde. Misma mecanica que `getRingMaterial` —es el
+ * limite del mapa jugable— contada como agua en vez de como energia.
+ */
+export function getTideMaterial(color: PaletteToken): ShaderMaterial {
+  const key = `tide|${color}`;
+  const cached = cache.get(key);
+  if (cached) return cached;
+  const material = new ShaderMaterial({
+    uniforms: {
+      uColor: { value: getColor(color).clone() },
+      uTime: { value: 0 },
+    },
+    vertexShader: RING_VERTEX,
+    fragmentShader: TIDE_FRAGMENT,
+    transparent: true,
+    side: DoubleSide,
+    depthWrite: false,
+    blending: AdditiveBlending,
+    fog: false,
+  });
+  material.name = key;
+  cache.set(key, material);
+  animated.add(material);
+  return material;
+}
+
 /**
  * El anillo del shooter: cilindro translucido con bandas animadas. Aditivo,
  * doble cara y sin escribir profundidad, para que se vea a traves y desde

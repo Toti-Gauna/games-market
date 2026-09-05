@@ -384,6 +384,15 @@ export default function ShooterGame({ config, signal, onFinish, onReady }: GameP
     }
   }, [netHandle.players, view]);
 
+  // El sonido sale del ciclo de vida, que ya sabe si esta silenciado.
+  const sfx = life.sfx;
+  useEffect(() => {
+    view.playSfx = (nombre) => sfx.play(nombre);
+    return () => {
+      view.playSfx = null;
+    };
+  }, [sfx, view]);
+
   const net = netHandle.net;
   useEffect(() => {
     view.send = net ? (input, sequence) => net.sendInput(input, sequence) : null;

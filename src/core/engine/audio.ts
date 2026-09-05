@@ -9,7 +9,7 @@
  * un juego que se cierra.
  */
 
-export type SfxName = "pick" | "hit" | "lose" | "win" | "tick" | "select";
+export type SfxName = "pick" | "hit" | "lose" | "win" | "tick" | "select" | "squirt" | "splash";
 
 type Voice = {
   wave: OscillatorType;
@@ -27,6 +27,11 @@ const VOICES: Record<SfxName, Voice> = {
   win: { wave: "triangle", freq: 520, toFreq: 1040, durationS: 0.35, gain: 0.22 },
   tick: { wave: "sine", freq: 880, durationS: 0.05, gain: 0.14 },
   select: { wave: "sine", freq: 440, toFreq: 560, durationS: 0.08, gain: 0.16 },
+  // Una pistola de agua: un chorro corto que sube, y una salpicadura grave
+  // que baja. Cortos y flojos a proposito: la manguera dispara catorce veces
+  // por segundo y cualquier cosa mas larga se vuelve un zumbido.
+  squirt: { wave: "sine", freq: 300, toFreq: 720, durationS: 0.06, gain: 0.1 },
+  splash: { wave: "triangle", freq: 520, toFreq: 160, durationS: 0.16, gain: 0.16 },
 };
 
 export type Sfx = {
