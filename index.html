@@ -4,6 +4,12 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, user-scalable=no" />
     <meta name="color-scheme" content="dark light" />
+    <!-- Agregado a la pantalla de inicio, un juego 3D abre sin barra de
+         navegador: es la unica pantalla completa de verdad que hay en iOS,
+         donde la API de Fullscreen no existe para elementos. -->
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <meta name="theme-color" content="#07060f" />
     <title>Supernova · Patio de juegos</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />

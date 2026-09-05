@@ -62,6 +62,17 @@ export type GameStageProps = {
    * Solo aplica al intro; la pausa y el resumen siguen tapando.
    */
   introShowcase?: boolean;
+  /**
+   * El juego llena el contenedor en vez de reservar su proporcion.
+   *
+   * En el banco de pruebas conviene lo contrario: el encuadre fijo hace
+   * comparables dos corridas y deja lugar alrededor para los controles. Pero
+   * en un celular, reservar 16:9 adentro de una pantalla vertical deja el
+   * juego en una franja con bandas negras arriba y abajo — que es como se
+   * "rompe" un 3D en el telefono. Con `fill` la superficie toma todo y la
+   * camara se acomoda sola, que es lo que ya hace en pantalla completa.
+   */
+  fill?: boolean;
   muted: boolean;
   onToggleMuted: () => void;
   onStart: () => void;
@@ -86,6 +97,7 @@ export function GameStage({
   introExtra,
   overlay,
   introShowcase = false,
+  fill = false,
   muted,
   onToggleMuted,
   onStart,
@@ -102,14 +114,21 @@ export function GameStage({
     <div className="flex h-full w-full flex-col">
       <div
         ref={containerRef}
-        className="relative flex min-h-0 flex-1 touch-none select-none items-center justify-center overflow-hidden rounded-sn-lg border border-sn-line-soft bg-sn-bg"
+        className={
+          fill
+            ? // De borde a borde: ni marco ni esquinas redondeadas, que a
+              // pantalla completa se ven como un recuadro flotando.
+              "relative flex min-h-0 flex-1 touch-none select-none items-center justify-center overflow-hidden bg-sn-bg"
+            : "relative flex min-h-0 flex-1 touch-none select-none items-center justify-center overflow-hidden rounded-sn-lg border border-sn-line-soft bg-sn-bg"
+        }
         /*
-         * En pantalla completa se suelta la proporcion: con `aspectRatio`
-         * puesto, el contenedor se queda del tamano que pedia el juego y
-         * sobra pantalla negra alrededor. El encuadre lo resuelve igual la
-         * superficie, que ya escala a lo que le den.
+         * A pantalla completa —o cuando el contenedor manda— se suelta la
+         * proporcion: con `aspectRatio` puesto, el contenedor se queda del
+         * tamano que pedia el juego y sobra pantalla negra alrededor. El
+         * encuadre lo resuelve igual la superficie, que ya escala a lo que
+         * le den.
          */
-        style={fullscreen.active ? undefined : { aspectRatio: aspect }}
+        style={fullscreen.active || fill ? undefined : { aspectRatio: aspect }}
       >
         {surface ? (
           <div className="absolute inset-0">{surface}</div>

@@ -530,6 +530,9 @@ export default function ShooterGame({ config, signal, onFinish, onReady }: GameP
       onPause={life.pause}
       onRestart={life.restart}
       aspect={16 / 9}
+      // En la pagina de jugar el juego toma la pantalla entera; en el banco
+      // de pruebas conserva su proporcion.
+      fill={config.fill === true}
       // El intro muestra el personaje sobre el pedestal: el panel se corre.
       introShowcase
       camera={{ position: [0, 60, 90], fov: 58, near: 0.1, far: 460 }}

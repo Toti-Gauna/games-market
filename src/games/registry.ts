@@ -448,6 +448,8 @@ export const GAMES: readonly GameEntry[] = [
     maxPlayers: 20,
     // El celular es un avatar en primera persona; el proyector, la vista aerea.
     phoneRole: "player",
+    // Tiene pagina propia a pantalla completa: `#/jugar/metaverso`.
+    standalonePlay: true,
     inputs: ["touch", "keyboard"],
     estimatedMin: 10,
     tags: ["3D", "avatares", "social"],

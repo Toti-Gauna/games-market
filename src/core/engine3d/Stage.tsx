@@ -87,6 +87,8 @@ export type StageProps = {
   overlay?: ReactNode;
   /** El intro deja ver la escena: el panel se corre y no hay velo. */
   introShowcase?: boolean;
+  /** El juego llena el contenedor en vez de reservar su proporcion. */
+  fill?: boolean;
   muted: boolean;
   onToggleMuted: () => void;
   onStart: () => void;
@@ -132,6 +134,7 @@ export function Stage({
   introExtra,
   overlay,
   introShowcase = false,
+  fill = false,
   muted,
   onToggleMuted,
   onStart,
@@ -245,6 +248,7 @@ export function Stage({
       {...(introExtra !== undefined ? { introExtra } : {})}
       {...(overlay !== undefined ? { overlay } : {})}
       introShowcase={introShowcase}
+      fill={fill}
       muted={muted}
       onToggleMuted={onToggleMuted}
       onStart={onStart}

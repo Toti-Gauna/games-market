@@ -58,6 +58,17 @@ export type GameRuntimeConfig = {
   settings: SettingsValues;
   /** true cuando corre en el banco de pruebas: habilita overlays de debug. */
   debug: boolean;
+  /**
+   * El juego ocupa toda la pantalla: que llene el contenedor en vez de
+   * reservar su proporcion.
+   *
+   * Lo decide el contenedor, no el juego. El banco de pruebas lo deja en
+   * false —ahi un encuadre fijo hace comparables dos corridas— y la pagina
+   * de jugar lo pone en true, que es lo unico que se ve en un celular: con
+   * 16:9 reservado adentro de una pantalla vertical, el juego queda en una
+   * franja con bandas negras. Un juego que no lo lea sigue andando igual.
+   */
+  fill?: boolean;
 };
 
 export type GameProps = {

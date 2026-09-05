@@ -330,6 +330,8 @@ export default function MetaversoGame({ config, signal, onFinish, onReady }: Gam
       onPause={life.pause}
       onRestart={life.restart}
       aspect={16 / 9}
+      // En la pagina de jugar el juego toma la pantalla entera.
+      fill={config.fill === true}
       camera={{ position: [0, 46, 22], fov: 46, near: 0.1, far: 220 }}
       lights={false}
       background="var(--sn-bg)"

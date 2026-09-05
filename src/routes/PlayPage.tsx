@@ -36,7 +36,57 @@ import { useFullscreen } from "@/ui/game/useFullscreen";
 /** Una sala viva por juego, igual que `lab-<id>` en el banco de pruebas. */
 const ROOM_PREFIX = "play-";
 
+/** Puntero grueso: telefono o tablet. Mismo criterio que el resto del catalogo. */
+function useCoarsePointer(): boolean {
+  const [coarse, setCoarse] = useState(false);
+  useEffect(() => {
+    if (typeof matchMedia !== "function") return;
+    const query = matchMedia("(pointer: coarse)");
+    const update = () => setCoarse(query.matches);
+    update();
+    query.addEventListener("change", update);
+    return () => query.removeEventListener("change", update);
+  }, []);
+  return coarse;
+}
+
+/**
+ * Mientras se juega, la pagina no se desplaza.
+ *
+ * En un celular, arrastrar el pulgar sobre el juego mueve la pagina entera y
+ * hace aparecer y desaparecer la barra del navegador — que es justo lo que
+ * rompe el encuadre de un 3D. Se suelta al salir.
+ */
+function useLockedScroll(): void {
+  useEffect(() => {
+    const { body, documentElement } = document;
+    const previous = {
+      bodyOverflow: body.style.overflow,
+      rootOverflow: documentElement.style.overflow,
+      overscroll: body.style.overscrollBehavior,
+    };
+    body.style.overflow = "hidden";
+    documentElement.style.overflow = "hidden";
+    body.style.overscrollBehavior = "none";
+    return () => {
+      body.style.overflow = previous.bodyOverflow;
+      documentElement.style.overflow = previous.rootOverflow;
+      body.style.overscrollBehavior = previous.overscroll;
+    };
+  }, []);
+}
+
+/**
+ * Un entero de la URL, o el de por defecto.
+ *
+ * La guarda del parametro ausente no es decorativa: `Number(null)` es 0 y 0
+ * es finito, asi que sin ella un parametro que no viene se lee como cero y el
+ * valor por defecto no se usa nunca. Con `asientos` ausente eso dejaba la
+ * sala en un solo puesto, y entonces CUALQUIER asiento se recortaba al 1 —
+ * es decir, todos los celulares entraban creyendose el proyector.
+ */
 function clampInt(raw: string | null, min: number, max: number, fallback: number): number {
+  if (raw === null || raw.trim() === "") return fallback;
   const parsed = Number(raw);
   if (!Number.isFinite(parsed)) return fallback;
   return Math.min(max, Math.max(min, Math.round(parsed)));
@@ -96,6 +146,8 @@ function PlayRun({ entry, params, fullscreen }: PlayRunProps) {
   const [qr, setQr] = useState<{ url: string; image: string } | null>(null);
   /** A que asiento invita el proximo QR. Cada uno invita al siguiente. */
   const nextSeat = useRef(2);
+  const coarse = useCoarsePointer();
+  useLockedScroll();
   const abortRef = useRef<AbortController>(new AbortController());
 
   const seats = clampInt(params.get("asientos"), 1, entry.maxPlayers, entry.maxPlayers);
@@ -120,6 +172,8 @@ function PlayRun({ entry, params, fullscreen }: PlayRunProps) {
       transport,
       settings,
       debug: false,
+      // Acá el juego es la pantalla: nada de reservar 16:9 y dejar bandas.
+      fill: true,
     }),
     [entry.id, seed, seat, seats, transport, settings],
   );
@@ -157,31 +211,47 @@ function PlayRun({ entry, params, fullscreen }: PlayRunProps) {
   }, [qr, entry.id, seed, transport, seats]);
 
   return (
-    <div className="flex h-screen w-screen flex-col overflow-hidden bg-sn-bg">
-      {/* Lo minimo: como se llama, invitar y salir. Sin pestañas ni sliders. */}
-      <header className="flex shrink-0 items-center justify-between gap-3 px-3 py-1.5">
-        <span className="truncate text-xs text-sn-dim">{entry.title}</span>
-        <div className="flex items-center gap-2">
-          {seat === 0 && (
-            <button type="button" className="sn-btn sn-btn--ghost text-[11px]" onClick={() => void share()}>
-              {qr ? "Cerrar" : "Compartir"}
-            </button>
-          )}
-          {fullscreen.supported && (
-            <button
-              type="button"
-              className="sn-btn sn-btn--ghost text-[11px]"
-              onClick={fullscreen.toggle}
-              aria-pressed={fullscreen.active}
-            >
-              {fullscreen.active ? "Salir de pantalla completa" : "Pantalla completa"}
-            </button>
-          )}
-          <Link to="/" className="sn-btn sn-btn--ghost text-[11px]">
-            Salir
-          </Link>
-        </div>
-      </header>
+    /*
+     * Fijo y con alto de viewport dinamico. En un celular las dos cosas
+     * importan: `100vh` en iOS mide la pantalla SIN la barra de direcciones,
+     * asi que el juego queda mas alto que lo visible y el pie se corta;
+     * `100dvh` mide lo que de verdad se ve. Y `fixed` evita el rebote al
+     * arrastrar, que en un juego con stick tactil mueve la pagina entera.
+     */
+    <div
+      className="fixed inset-0 flex flex-col overflow-hidden bg-sn-bg"
+      style={{ height: "100dvh" }}
+    >
+      {/*
+        La barra solo en escritorio. En un celular cada pixel de alto es
+        juego, y para volver ya esta el boton de atras del navegador; quien
+        reparte los QR es el proyector, que no es un telefono.
+      */}
+      {!coarse && (
+        <header className="flex shrink-0 items-center justify-between gap-3 px-3 py-1.5">
+          <span className="truncate text-xs text-sn-dim">{entry.title}</span>
+          <div className="flex items-center gap-2">
+            {seat === 0 && (
+              <button type="button" className="sn-btn sn-btn--ghost text-[11px]" onClick={() => void share()}>
+                {qr ? "Cerrar" : "Compartir"}
+              </button>
+            )}
+            {fullscreen.supported && (
+              <button
+                type="button"
+                className="sn-btn sn-btn--ghost text-[11px]"
+                onClick={fullscreen.toggle}
+                aria-pressed={fullscreen.active}
+              >
+                {fullscreen.active ? "Salir de pantalla completa" : "Pantalla completa"}
+              </button>
+            )}
+            <Link to="/" className="sn-btn sn-btn--ghost text-[11px]">
+              Salir
+            </Link>
+          </div>
+        </header>
+      )}
 
       <div className="min-h-0 flex-1">
         {GameComponent && (
